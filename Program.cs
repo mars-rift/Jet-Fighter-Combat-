@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-
-class JetFighterGame
+﻿class JetFighterGame
 {
     const int gridSize = 10;
     char[,] grid = new char[gridSize, gridSize];
