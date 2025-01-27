@@ -1,10 +1,69 @@
-﻿class JetFighterGame
+﻿using System;
+using System.Collections.Generic;
+
+abstract class EnemyJet
 {
-    const int gridSize = 10;
+    public int X { get; set; }
+    public int Y { get; set; }
+    public char Symbol { get; protected set; }
+
+    public EnemyJet(int x, int y)
+    {
+        X = x;
+        Y = y;
+        Symbol = 'E';
+    }
+
+    public abstract void Move(int playerX, int playerY, char[,] grid);
+}
+
+class BasicEnemyJet : EnemyJet
+{
+    public BasicEnemyJet(int x, int y) : base(x, y) { }
+
+    public override void Move(int playerX, int playerY, char[,] grid)
+    {
+        // Basic enemy moves randomly
+        Random random = new Random();
+        int moveDirection = random.Next(4);
+        switch (moveDirection)
+        {
+            case 0: if (X > 0) X--; break; // Up
+            case 1: if (X < grid.GetLength(0) - 1) X++; break; // Down
+            case 2: if (Y > 0) Y--; break; // Left
+            case 3: if (Y < grid.GetLength(1) - 1) Y++; break; // Right
+        }
+    }
+}
+
+class AdvancedEnemyJet : EnemyJet
+{
+    public AdvancedEnemyJet(int x, int y) : base(x, y)
+    {
+        Symbol = 'A';
+    }
+
+    public override void Move(int playerX, int playerY, char[,] grid)
+    {
+        // Advanced enemy moves towards the player
+        if (X < playerX) X++;
+        else if (X > playerX) X--;
+
+        if (Y < playerY) Y++;
+        else if (Y > playerY) Y--;
+    }
+}
+
+class JetFighterGame
+{
+    const int gridSize = 20;
     char[,] grid = new char[gridSize, gridSize];
-    int playerX = 0, playerY = 0;
+    int playerX = gridSize / 2, playerY = gridSize / 2; // Start player in the center
     char playerJet;
-    List<(int, int)> enemyPositions = new List<(int, int)>();
+    int playerHealth = 5; // Player health
+    int score = 0; // Player score
+    List<EnemyJet> enemyJets = new List<EnemyJet>();
+    Random random = new Random();
 
     public JetFighterGame()
     {
@@ -25,17 +84,17 @@
 
     void PlaceJetFighters()
     {
+        // Place enemy jets
+        enemyJets.Add(new BasicEnemyJet(9, 9));
+        enemyJets.Add(new AdvancedEnemyJet(5, 5));
+
+        foreach (var jet in enemyJets)
+        {
+            grid[jet.X, jet.Y] = jet.Symbol;
+        }
+
         // Place player's jet
         grid[playerX, playerY] = playerJet;
-
-        // Place enemy jets
-        enemyPositions.Add((9, 9));
-        enemyPositions.Add((5, 5));
-
-        foreach (var pos in enemyPositions)
-        {
-            grid[pos.Item1, pos.Item2] = 'E';
-        }
     }
 
     public void DisplayGrid()
@@ -48,6 +107,7 @@
             }
             Console.WriteLine();
         }
+        Console.WriteLine($"Health: {playerHealth}  Score: {score}");
     }
 
     public void MovePlayer(string direction)
@@ -75,11 +135,25 @@
         }
 
         // Check for combat
-        if (grid[playerX, playerY] == 'E')
+        if (grid[playerX, playerY] == 'E' || grid[playerX, playerY] == 'A')
         {
-            Console.WriteLine("Combat engaged! Enemy jet destroyed.");
-            grid[playerX, playerY] = playerJet;
-            enemyPositions.RemoveAll(e => e.Item1 == playerX && e.Item2 == playerY);
+            Console.WriteLine("Combat engaged!");
+            int damage = random.Next(1, 4); // Random damage between 1 and 3
+            playerHealth -= damage;
+            Console.WriteLine($"You took {damage} damage. Health remaining: {playerHealth}");
+
+            if (playerHealth <= 0)
+            {
+                Console.WriteLine("You have been defeated!");
+                Environment.Exit(0); // End the game
+            }
+            else
+            {
+                Console.WriteLine("Enemy jet destroyed.");
+                grid[playerX, playerY] = playerJet;
+                enemyJets.RemoveAll(e => e.X == playerX && e.Y == playerY);
+                score += 100; // Increase score
+            }
         }
         else
         {
@@ -88,7 +162,7 @@
         }
 
         // Check for victory condition
-        if (enemyPositions.Count == 0)
+        if (enemyJets.Count == 0)
         {
             Console.Clear();
             DisplayGrid();
@@ -99,36 +173,21 @@
 
     public void MoveEnemies()
     {
-        List<(int, int)> newEnemyPositions = new List<(int, int)>();
-
-        foreach (var pos in enemyPositions)
+        foreach (var jet in enemyJets)
         {
-            grid[pos.Item1, pos.Item2] = '.';
-
-            int newX = pos.Item1;
-            int newY = pos.Item2;
-
-            if (pos.Item1 < playerX) newX++;
-            else if (pos.Item1 > playerX) newX--;
-
-            if (pos.Item2 < playerY) newY++;
-            else if (pos.Item2 > playerY) newY--;
-
-            if (grid[newX, newY] == playerJet)
-            {
-                Console.WriteLine("Enemy jet collided with player! Player destroyed.");
-                Environment.Exit(0); // End the game
-            }
-
-            newEnemyPositions.Add((newX, newY));
+            grid[jet.X, jet.Y] = '.';
+            jet.Move(playerX, playerY, grid);
+            grid[jet.X, jet.Y] = jet.Symbol;
         }
 
-        foreach (var newPos in newEnemyPositions)
+        // Check for victory condition
+        if (enemyJets.Count == 0)
         {
-            grid[newPos.Item1, newPos.Item2] = 'E';
+            Console.Clear();
+            DisplayGrid();
+            Console.WriteLine("Victory! All enemy jets are destroyed.");
+            Environment.Exit(0); // End the game
         }
-
-        enemyPositions = newEnemyPositions;
     }
 
     static void Main(string[] args)
