@@ -59,7 +59,7 @@ class JetFighterGame
     const int gridSize = 20;
     char[,] grid = new char[gridSize, gridSize];
     int playerX = gridSize / 2, playerY = gridSize / 2; // Start player in the center
-    char playerJet;
+    char playerJet = 'F'; // Player jet is an F-35
     int playerHealth = 5; // Player health
     int score = 0; // Player score
     List<EnemyJet> enemyJets = new List<EnemyJet>();
@@ -129,8 +129,20 @@ class JetFighterGame
             case "d": // Right
                 if (playerY < gridSize - 1) playerY++;
                 break;
+            case "q": // Up-Left
+                if (playerX > 0 && playerY > 0) { playerX--; playerY--; }
+                break;
+            case "e": // Up-Right
+                if (playerX > 0 && playerY < gridSize - 1) { playerX--; playerY++; }
+                break;
+            case "z": // Down-Left
+                if (playerX < gridSize - 1 && playerY > 0) { playerX++; playerY--; }
+                break;
+            case "c": // Down-Right
+                if (playerX < gridSize - 1 && playerY < gridSize - 1) { playerX++; playerY++; }
+                break;
             default:
-                Console.WriteLine("Invalid move. Use 'w', 'a', 's', 'd'.");
+                Console.WriteLine("Invalid move. Use 'w', 'a', 's', 'd', 'q', 'e', 'z', 'c'.");
                 break;
         }
 
@@ -194,35 +206,16 @@ class JetFighterGame
     {
         JetFighterGame game = new JetFighterGame();
 
-        // Player jet selection
-        Console.WriteLine("Select your jet: F-22 (F) or Su-57 (S)");
-        while (true)
-        {
-            string choice = Console.ReadLine().ToUpper();
-            if (choice == "F")
-            {
-                game.playerJet = 'F';
-                break;
-            }
-            else if (choice == "S")
-            {
-                game.playerJet = 'S';
-                break;
-            }
-            else
-            {
-                Console.WriteLine("Invalid choice. Please select F-22 (F) or Su-57 (S)");
-            }
-        }
-
         while (true)
         {
             Console.Clear();
             game.DisplayGrid();
-            Console.WriteLine("Move your jet (w = up, s = down, a = left, d = right): ");
+            Console.WriteLine("Move your jet (w = up, s = down, a = left, d = right, q = up-left, e = up-right, z = down-left, c = down-right): ");
             string move = Console.ReadLine();
             game.MovePlayer(move);
             game.MoveEnemies();
         }
     }
 }
+
+
