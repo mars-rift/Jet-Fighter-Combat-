@@ -77,7 +77,7 @@ class JetFighterGame
 {
     const int gridSize = 20;
     char[,] grid = new char[gridSize, gridSize];
-    int playerX = gridSize / 2, playerY = gridSize / 2;
+    int playerX, playerY;
     char playerJet = 'F';
     int playerHealth = 5;
     int score = 0;
@@ -101,18 +101,35 @@ class JetFighterGame
         }
     }
 
+    (int, int) GenerateRandomPosition()
+    {
+        int x, y;
+        do
+        {
+            x = random.Next(gridSize);
+            y = random.Next(gridSize);
+        } while (grid[x, y] != '.'); // Ensure the position is empty
+        return (x, y);
+    }
+
     void PlaceJetFighters()
     {
-        enemyJets.Add(new BasicEnemyJet(9, 9));
-        enemyJets.Add(new AdvancedEnemyJet(5, 5));
-        enemyJets.Add(new StealthEnemyJet(15, 15));
-
-        foreach (var jet in enemyJets)
-        {
-            grid[jet.X, jet.Y] = jet.Symbol;
-        }
-
+        // Randomize player position
+        (playerX, playerY) = GenerateRandomPosition();
         grid[playerX, playerY] = playerJet;
+
+        // Randomize enemy positions
+        (int enemyX, int enemyY) = GenerateRandomPosition();
+        enemyJets.Add(new BasicEnemyJet(enemyX, enemyY));
+        grid[enemyX, enemyY] = 'E';
+
+        (enemyX, enemyY) = GenerateRandomPosition();
+        enemyJets.Add(new AdvancedEnemyJet(enemyX, enemyY));
+        grid[enemyX, enemyY] = 'A';
+
+        (enemyX, enemyY) = GenerateRandomPosition();
+        enemyJets.Add(new StealthEnemyJet(enemyX, enemyY));
+        grid[enemyX, enemyY] = 'S';
     }
 
     public void DisplayGrid()
