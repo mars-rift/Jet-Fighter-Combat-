@@ -23,7 +23,6 @@ class BasicEnemyJet : EnemyJet
 
     public override void Move(int playerX, int playerY, char[,] grid)
     {
-        // Basic enemy moves randomly
         Random random = new Random();
         int moveDirection = random.Next(4);
         switch (moveDirection)
@@ -45,7 +44,6 @@ class AdvancedEnemyJet : EnemyJet
 
     public override void Move(int playerX, int playerY, char[,] grid)
     {
-        // Advanced enemy moves towards the player
         if (X < playerX) X++;
         else if (X > playerX) X--;
 
@@ -54,14 +52,35 @@ class AdvancedEnemyJet : EnemyJet
     }
 }
 
+class StealthEnemyJet : EnemyJet
+{
+    public StealthEnemyJet(int x, int y) : base(x, y)
+    {
+        Symbol = 'S';
+    }
+
+    public override void Move(int playerX, int playerY, char[,] grid)
+    {
+        Random random = new Random();
+        int moveDirection = random.Next(4);
+        switch (moveDirection)
+        {
+            case 0: if (X > 0) X--; break; // Up
+            case 1: if (X < grid.GetLength(0) - 1) X++; break; // Down
+            case 2: if (Y > 0) Y--; break; // Left
+            case 3: if (Y < grid.GetLength(1) - 1) Y++; break; // Right
+        }
+    }
+}
+
 class JetFighterGame
 {
     const int gridSize = 20;
     char[,] grid = new char[gridSize, gridSize];
-    int playerX = gridSize / 2, playerY = gridSize / 2; // Start player in the center
-    char playerJet = 'F'; // Player jet is an F-35
-    int playerHealth = 5; // Player health
-    int score = 0; // Player score
+    int playerX = gridSize / 2, playerY = gridSize / 2;
+    char playerJet = 'F';
+    int playerHealth = 5;
+    int score = 0;
     List<EnemyJet> enemyJets = new List<EnemyJet>();
     Random random = new Random();
 
@@ -84,16 +103,15 @@ class JetFighterGame
 
     void PlaceJetFighters()
     {
-        // Place enemy jets
         enemyJets.Add(new BasicEnemyJet(9, 9));
         enemyJets.Add(new AdvancedEnemyJet(5, 5));
+        enemyJets.Add(new StealthEnemyJet(15, 15));
 
         foreach (var jet in enemyJets)
         {
             grid[jet.X, jet.Y] = jet.Symbol;
         }
 
-        // Place player's jet
         grid[playerX, playerY] = playerJet;
     }
 
@@ -112,66 +130,43 @@ class JetFighterGame
 
     public void MovePlayer(string direction)
     {
-        // Remove player from current position
         grid[playerX, playerY] = '.';
 
         switch (direction)
         {
-            case "w": // Up
-                if (playerX > 0) playerX--;
-                break;
-            case "s": // Down
-                if (playerX < gridSize - 1) playerX++;
-                break;
-            case "a": // Left
-                if (playerY > 0) playerY--;
-                break;
-            case "d": // Right
-                if (playerY < gridSize - 1) playerY++;
-                break;
-            case "q": // Up-Left
-                if (playerX > 0 && playerY > 0) { playerX--; playerY--; }
-                break;
-            case "e": // Up-Right
-                if (playerX > 0 && playerY < gridSize - 1) { playerX--; playerY++; }
-                break;
-            case "z": // Down-Left
-                if (playerX < gridSize - 1 && playerY > 0) { playerX++; playerY--; }
-                break;
-            case "c": // Down-Right
-                if (playerX < gridSize - 1 && playerY < gridSize - 1) { playerX++; playerY++; }
-                break;
-            default:
-                Console.WriteLine("Invalid move. Use 'w', 'a', 's', 'd', 'q', 'e', 'z', 'c'.");
-                break;
+            case "w": if (playerX > 0) playerX--; break;
+            case "s": if (playerX < gridSize - 1) playerX++; break;
+            case "a": if (playerY > 0) playerY--; break;
+            case "d": if (playerY < gridSize - 1) playerY++; break;
+            case "q": if (playerX > 0 && playerY > 0) { playerX--; playerY--; } break;
+            case "e": if (playerX > 0 && playerY < gridSize - 1) { playerX--; playerY++; } break;
+            case "z": if (playerX < gridSize - 1 && playerY > 0) { playerX++; playerY--; } break;
+            case "c": if (playerX < gridSize - 1 && playerY < gridSize - 1) { playerX++; playerY++; } break;
+            default: Console.WriteLine("Invalid move. Use 'w', 'a', 's', 'd', 'q', 'e', 'z', 'c'."); break;
         }
 
-        // Check for combat
-        if (grid[playerX, playerY] == 'E' || grid[playerX, playerY] == 'A')
+        if (grid[playerX, playerY] == 'E' || grid[playerX, playerY] == 'A' || grid[playerX, playerY] == 'S')
         {
             Console.WriteLine("Combat engaged!");
-            int damage = random.Next(1, 4); // Random damage between 1 and 3
+            int damage = random.Next(1, 4);
             playerHealth -= damage;
             Console.WriteLine($"You took {damage} damage. Health remaining: {playerHealth}");
 
             if (playerHealth <= 0)
             {
                 Console.WriteLine("You have been defeated!");
-                Environment.Exit(0); // End the game
+                Environment.Exit(0);
             }
             else
             {
                 Console.WriteLine("Enemy jet destroyed.");
-                grid[playerX, playerY] = playerJet;
                 enemyJets.RemoveAll(e => e.X == playerX && e.Y == playerY);
-                score += 100; // Increase score
+                score += 100;
             }
         }
-        else
-        {
-            // Place player at new position
-            grid[playerX, playerY] = playerJet;
-        }
+
+        // Ensure player icon remains 'F'
+        grid[playerX, playerY] = playerJet;
 
         // Check for victory condition
         if (enemyJets.Count == 0)
@@ -179,7 +174,7 @@ class JetFighterGame
             Console.Clear();
             DisplayGrid();
             Console.WriteLine("Victory! All enemy jets are destroyed.");
-            Environment.Exit(0); // End the game
+            Environment.Exit(0);
         }
     }
 
@@ -192,13 +187,16 @@ class JetFighterGame
             grid[jet.X, jet.Y] = jet.Symbol;
         }
 
+        // Ensure player icon remains 'F'
+        grid[playerX, playerY] = playerJet;
+
         // Check for victory condition
         if (enemyJets.Count == 0)
         {
             Console.Clear();
             DisplayGrid();
             Console.WriteLine("Victory! All enemy jets are destroyed.");
-            Environment.Exit(0); // End the game
+            Environment.Exit(0);
         }
     }
 
@@ -211,11 +209,16 @@ class JetFighterGame
             Console.Clear();
             game.DisplayGrid();
             Console.WriteLine("Move your jet (w = up, s = down, a = left, d = right, q = up-left, e = up-right, z = down-left, c = down-right): ");
-            string move = Console.ReadLine();
-            game.MovePlayer(move);
-            game.MoveEnemies();
+            string? move = Console.ReadLine();
+            if (move != null)
+            {
+                game.MovePlayer(move);
+                game.MoveEnemies();
+            }
+            else
+            {
+                Console.WriteLine("Invalid input. Please enter a valid move.");
+            }
         }
     }
 }
-
-
