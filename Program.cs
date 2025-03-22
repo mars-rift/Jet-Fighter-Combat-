@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 
 enum EnemyState { Patrolling, Chasing, Retreating }
+enum Weather { Clear, Cloudy, Storm }
 
 abstract class EnemyJet
 {
@@ -11,6 +12,14 @@ abstract class EnemyJet
     public char Symbol { get; protected set; }
     public int Health { get; set; }
     public abstract int ScoreValue { get; }
+    public double Heading { get; set; } // Direction in degrees (0-359)
+    public double Velocity { get; set; } // Current speed
+    public double MaxVelocity { get; protected set; }
+    public double TurnRate { get; protected set; } // How fast the jet can turn
+    public int Altitude { get; set; } // 0-3 altitude levels
+    public int Fuel { get; set; }
+    public int MaxFuel { get; protected set; }
+    public bool IsDetected { get; set; }
 
     public EnemyJet(int x, int y)
     {
@@ -41,6 +50,24 @@ class BasicEnemyJet : EnemyJet
         {
             X = step.Value.nextX;
             Y = step.Value.nextY;
+        }
+        ConsumeFuel("regular");
+    }
+
+    private void ConsumeFuel(string maneuver)
+    {
+        int consumption = maneuver switch {
+            "afterburner" => 5,
+            "climb" => 3,
+            "turn" => 2,
+            _ => 1 // Regular movement
+        };
+        
+        Fuel -= consumption;
+        if (Fuel <= 0)
+        {
+            Fuel = 0;
+            // Handle out of fuel - emergency landing or crash
         }
     }
 }
@@ -82,6 +109,7 @@ class AdvancedEnemyJet : EnemyJet
                 RetreatMove(playerX, playerY, grid);
                 break;
         }
+        ConsumeFuel("regular");
     }
 
     private bool IsPlayerClose(int playerX, int playerY) =>
@@ -118,6 +146,23 @@ class AdvancedEnemyJet : EnemyJet
             Y = newY;
         }
     }
+
+    private void ConsumeFuel(string maneuver)
+    {
+        int consumption = maneuver switch {
+            "afterburner" => 5,
+            "climb" => 3,
+            "turn" => 2,
+            _ => 1 // Regular movement
+        };
+        
+        Fuel -= consumption;
+        if (Fuel <= 0)
+        {
+            Fuel = 0;
+            // Handle out of fuel - emergency landing or crash
+        }
+    }
 }
 
 class StealthEnemyJet : EnemyJet
@@ -140,6 +185,24 @@ class StealthEnemyJet : EnemyJet
         {
             X = step.Value.nextX;
             Y = step.Value.nextY;
+        }
+        ConsumeFuel("regular");
+    }
+
+    private void ConsumeFuel(string maneuver)
+    {
+        int consumption = maneuver switch {
+            "afterburner" => 5,
+            "climb" => 3,
+            "turn" => 2,
+            _ => 1 // Regular movement
+        };
+        
+        Fuel -= consumption;
+        if (Fuel <= 0)
+        {
+            Fuel = 0;
+            // Handle out of fuel - emergency landing or crash
         }
     }
 }
@@ -177,6 +240,20 @@ class JetFighterGame
     private int playerDamage = 1;
     private List<EnemyJet> enemyJets;
     private Random random;
+    private Weather currentWeather = Weather.Clear;
+    private double detectionRangeModifier = 1.0;
+    private double accuracyModifier = 1.0;
+    private int playerAltitude = 1;
+    private int missileAmmo = 10;
+    private int gunAmmo = 500;
+
+    public double Heading { get; set; } // Direction in degrees (0-359)
+    public double Velocity { get; set; } // Current speed
+    public double MaxVelocity { get; protected set; }
+    public double TurnRate { get; protected set; } // How fast the jet can turn
+    public int Altitude { get; set; } // 0-3 altitude levels
+    public int Fuel { get; set; }
+    public int MaxFuel { get; protected set; }
 
     public JetFighterGame()
     {
@@ -287,13 +364,51 @@ class JetFighterGame
     public void DisplayGrid()
     {
         Console.Clear();
+        
+        // Show radar information
+        Console.WriteLine("RADAR STATUS:");
+        foreach (var enemy in enemyJets.Where(e => e.IsDetected))
+        {
+            Console.WriteLine($"{enemy.GetType().Name} at ({enemy.X},{enemy.Y}) | " +
+                             $"Alt: {enemy.Altitude} | Health: {enemy.Health}");
+        }
+        
+        // Show grid with altitude indicators
         for (int i = 0; i < gridSize; i++)
         {
             for (int j = 0; j < gridSize; j++)
-                Console.Write(grid[i, j] + " ");
+            {
+                // Display different colors based on altitude
+                if (i == playerX && j == playerY)
+                {
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.Write(playerJet + " ");
+                    Console.ResetColor();
+                }
+                else
+                {
+                    // Find if there's an enemy at this position
+                    var enemy = enemyJets.FirstOrDefault(e => e.X == i && e.Y == j);
+                    if (enemy != null && enemy.IsDetected)
+                    {
+                        // Color based on enemy type
+                        Console.ForegroundColor = enemy is StealthEnemyJet ? 
+                            ConsoleColor.DarkGray : ConsoleColor.Red;
+                        Console.Write(enemy.Symbol + " ");
+                        Console.ResetColor();
+                    }
+                    else
+                    {
+                        Console.Write(grid[i, j] + " ");
+                    }
+                }
+            }
             Console.WriteLine();
         }
-        Console.WriteLine($"Player Health: {playerHealth}  Score: {score}");
+        
+        Console.WriteLine($"Player Health: {playerHealth}  Score: {score}  Fuel: {Fuel}");
+        Console.WriteLine($"Altitude: {playerAltitude}  Weapons: Missiles ({missileAmmo}) Guns ({gunAmmo})");
+        Console.WriteLine($"Weather: {currentWeather}");
     }
 
     private void EndGame(string message)
@@ -311,21 +426,31 @@ class JetFighterGame
     private void ProcessCombat(EnemyJet enemy)
     {
         Console.WriteLine($"\nCombat engaged with {enemy.GetType().Name}!");
-
-        // Player attacks enemy.
-        enemy.Health -= playerDamage;
-        Console.WriteLine($"You hit the enemy for {playerDamage} damage.");
-
+        DisplayCombatOptions(enemy);
+        
+        string? action = Console.ReadLine();
+        switch (action?.ToLower())
+        {
+            case "1": // Fire missile
+                if (TryFireWeapon("Missile", enemy, 7))
+                    Console.WriteLine("Missile away!");
+                break;
+            case "2": // Gun attack
+                if (TryFireWeapon("Gun", enemy, 3))
+                    Console.WriteLine("Guns firing!");
+                break;
+            case "3": // Evasive maneuver
+                PerformEvasiveManeuver();
+                break;
+            default:
+                Console.WriteLine("Combat opportunity missed!");
+                break;
+        }
+        
+        // Enemy counterattack with realistic factors
         if (enemy.Health > 0)
         {
-            // Enemy counterattacks with higher damage and added critical chance.
-            int baseDamage = random.Next(1, 6); // Damage between 1 and 5.
-            bool isCritical = random.NextDouble() < 0.3; // 30% chance.
-            int damageTaken = isCritical ? baseDamage * 2 : baseDamage;
-            Console.WriteLine($"{enemy.GetType().Name} counterattacks{(isCritical ? " with a critical hit" : "")}! You took {damageTaken} damage.");
-            playerHealth -= damageTaken;
-            if (playerHealth <= 0)
-                currentState = GameState.Defeat;
+            EnemyAttack(enemy);
         }
         else
         {
@@ -335,7 +460,6 @@ class JetFighterGame
             if (enemyJets.Count == 0)
             {
                 currentState = GameState.Victory;
-                return;
             }
         }
     }
@@ -426,6 +550,234 @@ class JetFighterGame
             _ => "Game Over!"
         };
         EndGame(message);
+    }
+
+    private void UpdateRadar()
+    {
+        foreach (var enemy in enemyJets)
+        {
+            // Check if enemy is in detection range based on altitude and stealth
+            bool isDetected = CalculateDetection(enemy);
+            enemy.IsDetected = isDetected;
+        }
+    }
+
+    private bool CalculateDetection(EnemyJet enemy)
+    {
+        int detectionRange = 8; // Base detection range
+
+        // StealthEnemyJet is harder to detect
+        if (enemy is StealthEnemyJet)
+            detectionRange = 4;
+
+        // Higher altitude increases detection range
+        detectionRange += playerAltitude;
+
+        // Calculate distance
+        double distance = Math.Sqrt(Math.Pow(enemy.X - playerX, 2) + Math.Pow(enemy.Y - playerY, 2));
+
+        return distance <= detectionRange * detectionRangeModifier;
+    }
+
+    private void DisplayCombatOptions(EnemyJet enemy)
+    {
+        Console.WriteLine("Combat Options:");
+        Console.WriteLine("1. Fire missile");
+        Console.WriteLine("2. Gun attack");
+        Console.WriteLine("3. Evasive maneuver");
+        Console.WriteLine("Choose your action (1-3):");
+    }
+
+    private void UpdateWeather()
+    {
+        if (random.NextDouble() < 0.05) // 5% chance to change weather each turn
+        {
+            currentWeather = (Weather)random.Next(0, 3);
+            Console.WriteLine($"Weather changing to: {currentWeather}");
+        }
+        
+        // Apply weather effects
+        switch (currentWeather)
+        {
+            case Weather.Storm:
+                // Reduce visibility and accuracy
+                detectionRangeModifier = 0.5;
+                accuracyModifier = 0.7;
+                break;
+            case Weather.Cloudy:
+                detectionRangeModifier = 0.8;
+                accuracyModifier = 0.9;
+                break;
+            default:
+                detectionRangeModifier = 1.0;
+                accuracyModifier = 1.0;
+                break;
+        }
+    }
+    
+    private bool TryFireWeapon(string weaponType, EnemyJet enemy, int baseDamage)
+    {
+        int ammo = weaponType == "Missile" ? missileAmmo : gunAmmo;
+        if (ammo <= 0)
+        {
+            Console.WriteLine($"Out of {weaponType.ToLower()} ammo!");
+            return false;
+        }
+        
+        // Calculate hit chance based on weather, altitude and distance
+        double hitChance = 0.75 * accuracyModifier; // Base hit chance adjusted for weather
+        double distance = Math.Sqrt(Math.Pow(enemy.X - playerX, 2) + Math.Pow(enemy.Y - playerY, 2));
+        
+        // Adjust hit chance based on distance
+        if (distance > 5) hitChance -= 0.1; // Harder to hit at longer distances
+        
+        // Roll for hit
+        if (random.NextDouble() <= hitChance)
+        {
+            // Hit successful
+            enemy.Health -= baseDamage;
+            Console.WriteLine($"Hit! Enemy {enemy.GetType().Name} took {baseDamage} damage.");
+            
+            // Reduce ammo
+            if (weaponType == "Missile")
+                missileAmmo--;
+            else
+                gunAmmo -= 10; // Guns use more ammo per attack
+            
+            return true;
+        }
+        else
+        {
+            Console.WriteLine($"{weaponType} missed!");
+            
+            // Still consume ammo on miss
+            if (weaponType == "Missile")
+                missileAmmo--;
+            else
+                gunAmmo -= 5; // Less ammo used when missing
+                
+            return false;
+        }
+    }
+    
+    private void PerformEvasiveManeuver()
+    {
+        // Implement evasive maneuver logic
+        Console.WriteLine("Performing evasive maneuver!");
+        
+        // Chance to avoid enemy attacks in the next turn
+        ConsumeFuel("turn");
+        
+        // Move to a random adjacent cell if possible
+        int[] dx = { -1, -1, -1, 0, 0, 1, 1, 1 };
+        int[] dy = { -1, 0, 1, -1, 1, -1, 0, 1 };
+        
+        List<(int, int)> validMoves = new List<(int, int)>();
+        for (int i = 0; i < dx.Length; i++)
+        {
+            int newX = playerX + dx[i];
+            int newY = playerY + dy[i];
+            if (newX >= 0 && newX < gridSize && newY >= 0 && newY < gridSize)
+            {
+                validMoves.Add((newX, newY));
+            }
+        }
+        
+        if (validMoves.Count > 0)
+        {
+            var move = validMoves[random.Next(validMoves.Count)];
+            playerX = move.Item1;
+            playerY = move.Item2;
+            Console.WriteLine("Moved to a new position!");
+        }
+    }
+    
+    private void EnemyAttack(EnemyJet enemy)
+    {
+        double attackChance = 0.6;
+        // Stealth enemies have lower attack chance
+        if (enemy is StealthEnemyJet) attackChance = 0.4;
+        
+        if (random.NextDouble() <= attackChance)
+        {
+            int damage = random.Next(1, 3);
+            Console.WriteLine($"Enemy {enemy.GetType().Name} hits you for {damage} damage!");
+            playerHealth -= damage;
+            
+            if (playerHealth <= 0)
+            {
+                currentState = GameState.Defeat;
+            }
+        }
+        else
+        {
+            Console.WriteLine($"Enemy {enemy.GetType().Name} missed!");
+        }
+    }
+    
+    private void ConsumeFuel(string maneuver)
+    {
+        int consumption = maneuver switch {
+            "afterburner" => 5,
+            "climb" => 3,
+            "turn" => 2,
+            _ => 1 // Regular movement
+        };
+        
+        Fuel -= consumption;
+        if (Fuel <= 0)
+        {
+            Fuel = 0;
+            // Handle out of fuel - emergency landing or crash
+        }
+    }
+}
+
+// New class for weapons
+class Weapon
+{
+    public string Name { get; }
+    public int Range { get; }
+    public int Damage { get; }
+    public int Ammo { get; set; }
+    
+    public Weapon(string name, int range, int damage, int ammo)
+    {
+        Name = name;
+        Range = range;
+        Damage = damage;
+        Ammo = ammo;
+    }
+    
+    public bool Fire(out int damageDealt)
+    {
+        damageDealt = 0;
+        if (Ammo <= 0) return false;
+        
+        Ammo--;
+        damageDealt = Damage;
+        return true;
+    }
+}
+
+class Mission
+{
+    public string Objective { get; }
+    public bool IsComplete { get; private set; }
+    public int RewardPoints { get; }
+    
+    public Mission(string objective, int rewardPoints)
+    {
+        Objective = objective;
+        RewardPoints = rewardPoints;
+        IsComplete = false;
+    }
+    
+    public void Complete()
+    {
+        IsComplete = true;
+        Console.WriteLine($"Mission complete: {Objective}");
+        Console.WriteLine($"Reward: {RewardPoints} points");
     }
 }
 
