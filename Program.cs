@@ -27,6 +27,13 @@ abstract class EnemyJet
         Y = y;
         Symbol = 'E';
         Health = 1;
+        Fuel = 100;     // Initialize with fuel
+        MaxFuel = 100;
+        Altitude = 1;   // Set starting altitude
+        Heading = 0;
+        Velocity = 1;
+        MaxVelocity = 2;
+        TurnRate = 45;  // 45 degrees per turn
     }
 
     public abstract void Move(int playerX, int playerY, char[,] grid);
@@ -39,6 +46,8 @@ class BasicEnemyJet : EnemyJet
     public BasicEnemyJet(int x, int y, JetFighterGame game) : base(x, y)
     {
         this.game = game;
+        Health = 2;     // Increase from 1 to 2
+        Symbol = 'B';
     }
 
     public override int ScoreValue => 100;
@@ -81,7 +90,9 @@ class AdvancedEnemyJet : EnemyJet
     {
         gameInstance = game;
         Symbol = 'A';
-        Health = 2;
+        Health = 4;      // Increase from 2 to 4
+        MaxVelocity = 3; // Faster than basic
+        TurnRate = 60;   // More maneuverable
     }
 
     public override int ScoreValue => 150;
@@ -173,7 +184,9 @@ class StealthEnemyJet : EnemyJet
     {
         this.game = game;
         Symbol = 'S';
-        Health = 1;
+        Health = 3;      // Increase from 1 to 3
+        MaxVelocity = 2.5;
+        TurnRate = 50;
     }
 
     public override int ScoreValue => 200;
@@ -237,7 +250,13 @@ class JetFighterGame
     private char playerJet = 'F';
     private int playerHealth = 5;
     private int score = 0;
-    private int playerDamage = 1;
+
+    private int _playerDamage = 1;
+    public int PlayerDamage 
+    { 
+        get => _playerDamage; 
+        set => _playerDamage = value; 
+    }
     private List<EnemyJet> enemyJets;
     private Random random;
     private Weather currentWeather = Weather.Clear;
@@ -260,6 +279,13 @@ class JetFighterGame
         grid = new char[gridSize, gridSize];
         enemyJets = new List<EnemyJet>();
         random = new Random();
+        // Initialize flight parameters
+        Fuel = 100;
+        MaxFuel = 100;
+        Heading = 0;
+        Velocity = 1;
+        MaxVelocity = 2;
+        TurnRate = 45;
         InitializeGrid();
         PlaceJetFighters();
     }
@@ -408,7 +434,7 @@ class JetFighterGame
         
         Console.WriteLine($"Player Health: {playerHealth}  Score: {score}  Fuel: {Fuel}");
         Console.WriteLine($"Altitude: {playerAltitude}  Weapons: Missiles ({missileAmmo}) Guns ({gunAmmo})");
-        Console.WriteLine($"Weather: {currentWeather}");
+        Console.WriteLine($"Weather: {currentWeather}  Damage Multiplier: x{PlayerDamage}");
     }
 
     private void EndGame(string message)
@@ -457,6 +483,13 @@ class JetFighterGame
             Console.WriteLine($"{enemy.GetType().Name} destroyed!");
             enemyJets.Remove(enemy);
             score += enemy.ScoreValue;
+            
+            // Random chance for power-up when defeating enemy
+            if (random.NextDouble() < 0.25) // 25% chance
+            {
+                PowerUp();
+            }
+            
             if (enemyJets.Count == 0)
             {
                 currentState = GameState.Victory;
@@ -501,6 +534,9 @@ class JetFighterGame
         if (currentState != GameState.Playing)
             return;
 
+        UpdateWeather();
+        UpdateRadar();
+
         foreach (var jet in enemyJets.ToList())
         {
             grid[jet.X, jet.Y] = '.';
@@ -519,8 +555,9 @@ class JetFighterGame
             grid[jet.X, jet.Y] = jet.Symbol;
         }
 
-        // Coordinated enemy attack now deals more damage with a chance for critical hits.
+        // Define adjacentEnemies before using it
         var adjacentEnemies = enemyJets.FindAll(e => Math.Abs(e.X - playerX) <= 1 && Math.Abs(e.Y - playerY) <= 1);
+        
         if (adjacentEnemies.Count >= 2)
         {
             int totalDamage = adjacentEnemies.Sum(e =>
@@ -552,7 +589,7 @@ class JetFighterGame
         EndGame(message);
     }
 
-    private void UpdateRadar()
+    public void UpdateRadar()
     {
         foreach (var enemy in enemyJets)
         {
@@ -625,24 +662,30 @@ class JetFighterGame
         }
         
         // Calculate hit chance based on weather, altitude and distance
-        double hitChance = 0.75 * accuracyModifier; // Base hit chance adjusted for weather
+        double hitChance = 0.65 * accuracyModifier;
         double distance = Math.Sqrt(Math.Pow(enemy.X - playerX, 2) + Math.Pow(enemy.Y - playerY, 2));
         
         // Adjust hit chance based on distance
-        if (distance > 5) hitChance -= 0.1; // Harder to hit at longer distances
+        if (distance > 5) hitChance -= 0.15;
+        if (distance > 8) hitChance -= 0.15;
+        
+        // Stealth enemies are harder to hit
+        if (enemy is StealthEnemyJet) hitChance -= 0.2;
         
         // Roll for hit
         if (random.NextDouble() <= hitChance)
         {
-            // Hit successful
-            enemy.Health -= baseDamage;
-            Console.WriteLine($"Hit! Enemy {enemy.GetType().Name} took {baseDamage} damage.");
+            // Use playerDamage as a multiplier for weapon damage
+            int baseDmg = weaponType == "Missile" ? random.Next(4, 7) : random.Next(1, 3);
+            int damage = baseDmg * PlayerDamage; // Using playerDamage here
+            enemy.Health -= damage;
+            Console.WriteLine($"Hit! Enemy {enemy.GetType().Name} took {damage} damage.");
             
             // Reduce ammo
             if (weaponType == "Missile")
                 missileAmmo--;
             else
-                gunAmmo -= 10; // Guns use more ammo per attack
+                gunAmmo -= 10;
             
             return true;
         }
@@ -650,11 +693,10 @@ class JetFighterGame
         {
             Console.WriteLine($"{weaponType} missed!");
             
-            // Still consume ammo on miss
             if (weaponType == "Missile")
                 missileAmmo--;
             else
-                gunAmmo -= 5; // Less ammo used when missing
+                gunAmmo -= 5;
                 
             return false;
         }
@@ -694,14 +736,37 @@ class JetFighterGame
     
     private void EnemyAttack(EnemyJet enemy)
     {
-        double attackChance = 0.6;
-        // Stealth enemies have lower attack chance
-        if (enemy is StealthEnemyJet) attackChance = 0.4;
+        // Increase base attack chance
+        double attackChance = 0.75; // From 0.6
+        
+        // Stealth enemies harder to detect but more deadly when they attack
+        if (enemy is StealthEnemyJet) 
+        {
+            attackChance = 0.6; // From 0.4
+        }
+        
+        // Advanced enemies are more accurate
+        if (enemy is AdvancedEnemyJet)
+        {
+            attackChance = 0.85;
+        }
+        
+        // Apply weather effects to attack chance
+        attackChance *= accuracyModifier;
         
         if (random.NextDouble() <= attackChance)
         {
-            int damage = random.Next(1, 3);
-            Console.WriteLine($"Enemy {enemy.GetType().Name} hits you for {damage} damage!");
+            // Increase damage range
+            int baseDamage = enemy is BasicEnemyJet ? random.Next(1, 3) : 
+                             enemy is AdvancedEnemyJet ? random.Next(2, 4) :
+                             random.Next(3, 5); // Stealth jets do most damage
+            
+            // Critical hit chance
+            bool isCrit = random.NextDouble() < 0.2;
+            int damage = isCrit ? baseDamage * 2 : baseDamage;
+            
+            Console.WriteLine($"Enemy {enemy.GetType().Name} hits you for {damage} damage!" + 
+                             (isCrit ? " CRITICAL HIT!" : ""));
             playerHealth -= damage;
             
             if (playerHealth <= 0)
@@ -730,6 +795,12 @@ class JetFighterGame
             Fuel = 0;
             // Handle out of fuel - emergency landing or crash
         }
+    }
+
+    public void PowerUp()
+    {
+        PlayerDamage++;
+        Console.WriteLine($"POWER UP! Weapon damage increased to x{PlayerDamage}");
     }
 }
 
@@ -786,6 +857,7 @@ class Program
     static void Main(string[] args)
     {
         JetFighterGame game = new JetFighterGame();
+        game.UpdateRadar(); // Add initial radar update
         game.DisplayGrid();
 
         while (true)
@@ -796,7 +868,7 @@ class Program
                 continue;
 
             game.MovePlayer(input);
-            game.MoveEnemies();
+            game.MoveEnemies(); // This now includes UpdateWeather and UpdateRadar
             game.DisplayGrid();
         }
     }
