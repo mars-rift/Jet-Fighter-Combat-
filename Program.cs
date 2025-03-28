@@ -37,6 +37,41 @@ abstract class EnemyJet
     }
 
     public abstract void Move(int playerX, int playerY, char[,] grid);
+
+    protected void ConsumeFuel(string maneuver)
+    {
+        int consumption = maneuver switch {
+            "afterburner" => 5,
+            "climb" => 3,
+            "turn" => 2,
+            _ => 1 // Regular movement
+        };
+        
+        Fuel -= consumption;
+        if (Fuel <= 0)
+        {
+            Fuel = 0;
+            // Handle out of fuel emergency
+            HandleOutOfFuel();
+        }
+    }
+
+    protected void HandleOutOfFuel()
+    {
+        // For enemy jets
+        Health -= 1; // Damage from engine failure
+        
+        // Emergency descent - lose altitude each turn
+        if (Altitude > 0)
+        {
+            Altitude--;
+        }
+        else
+        {
+            // Crashed
+            Health = 0;
+        }
+    }
 }
 
 class BasicEnemyJet : EnemyJet
@@ -61,23 +96,6 @@ class BasicEnemyJet : EnemyJet
             Y = step.Value.nextY;
         }
         ConsumeFuel("regular");
-    }
-
-    private void ConsumeFuel(string maneuver)
-    {
-        int consumption = maneuver switch {
-            "afterburner" => 5,
-            "climb" => 3,
-            "turn" => 2,
-            _ => 1 // Regular movement
-        };
-        
-        Fuel -= consumption;
-        if (Fuel <= 0)
-        {
-            Fuel = 0;
-            // Handle out of fuel - emergency landing or crash
-        }
     }
 }
 
@@ -157,23 +175,6 @@ class AdvancedEnemyJet : EnemyJet
             Y = newY;
         }
     }
-
-    private void ConsumeFuel(string maneuver)
-    {
-        int consumption = maneuver switch {
-            "afterburner" => 5,
-            "climb" => 3,
-            "turn" => 2,
-            _ => 1 // Regular movement
-        };
-        
-        Fuel -= consumption;
-        if (Fuel <= 0)
-        {
-            Fuel = 0;
-            // Handle out of fuel - emergency landing or crash
-        }
-    }
 }
 
 class StealthEnemyJet : EnemyJet
@@ -200,23 +201,6 @@ class StealthEnemyJet : EnemyJet
             Y = step.Value.nextY;
         }
         ConsumeFuel("regular");
-    }
-
-    private void ConsumeFuel(string maneuver)
-    {
-        int consumption = maneuver switch {
-            "afterburner" => 5,
-            "climb" => 3,
-            "turn" => 2,
-            _ => 1 // Regular movement
-        };
-        
-        Fuel -= consumption;
-        if (Fuel <= 0)
-        {
-            Fuel = 0;
-            // Handle out of fuel - emergency landing or crash
-        }
     }
 }
 
@@ -273,6 +257,8 @@ class JetFighterGame
     public int Altitude { get; set; } // 0-3 altitude levels
     public int Fuel { get; set; }
     public int MaxFuel { get; protected set; }
+
+    private bool afterburnerEnabled = false;
 
     public JetFighterGame()
     {
@@ -356,6 +342,17 @@ class JetFighterGame
         for (int i = 0; i < gridSize; i++)
             for (int j = 0; j < gridSize; j++)
                 grid[i, j] = '.';
+        
+        // Add fuel bases/airfields (3 of them) at random positions
+        for (int i = 0; i < 3; i++)
+        {
+            var (x, y) = GenerateRandomPosition();
+            grid[x, y] = 'B'; // B for Base/airfield
+        }
+
+        // Add mid-air refueling tankers (1 of them) that move slowly
+        var (tankerX, tankerY) = GenerateRandomPosition();
+        grid[tankerX, tankerY] = 'T'; // T for Tanker
     }
 
     private void PlaceJetFighters()
@@ -432,9 +429,37 @@ class JetFighterGame
             Console.WriteLine();
         }
         
-        Console.WriteLine($"Player Health: {playerHealth}  Score: {score}  Fuel: {Fuel}");
-        Console.WriteLine($"Altitude: {playerAltitude}  Weapons: Missiles ({missileAmmo}) Guns ({gunAmmo})");
+        Console.WriteLine($"Player Health: {playerHealth}  Score: {score}");
+        
+        // Show fuel status with color coding
+        Console.Write("Fuel: ");
+        if (Fuel < MaxFuel * 0.2) // Less than 20%
+            Console.ForegroundColor = ConsoleColor.Red;
+        else if (Fuel < MaxFuel * 0.5) // Less than 50%
+            Console.ForegroundColor = ConsoleColor.Yellow;
+        else
+            Console.ForegroundColor = ConsoleColor.Green;
+            
+        Console.Write($"{Fuel}/{MaxFuel}");
+        Console.ResetColor();
+        
+        // Show afterburner status
+        Console.Write($"  Afterburner: {(afterburnerEnabled ? "ON" : "OFF")}");
+        
+        Console.WriteLine($"\nAltitude: {playerAltitude}  Weapons: Missiles ({missileAmmo}) Guns ({gunAmmo})");
         Console.WriteLine($"Weather: {currentWeather}  Damage Multiplier: x{PlayerDamage}");
+        
+        // Always display controls
+        Console.WriteLine("\n\nCONTROLS:");
+        Console.WriteLine("Movement: w/a/s/d/q/e/z/c");
+        Console.WriteLine("Actions: r (refuel), b (afterburner), u (climb), j (descend)");
+        
+        // Display map legend
+        Console.WriteLine("\nMAP LEGEND:");
+        Console.WriteLine("F - Your fighter jet");
+        Console.WriteLine("B - Base/airfield (refuel here)");
+        Console.WriteLine("T - Tanker aircraft (refuel when adjacent)");
+        Console.WriteLine("E/A/S - Enemy jets");
     }
 
     private void EndGame(string message)
@@ -503,6 +528,10 @@ class JetFighterGame
 
         grid[playerX, playerY] = '.';
 
+        // Save original position in case we need to roll back
+        int originalX = playerX;
+        int originalY = playerY;
+
         switch (direction)
         {
             case "w": if (playerX > 0) playerX--; break;
@@ -515,7 +544,13 @@ class JetFighterGame
             case "c": if (playerX < gridSize - 1 && playerY < gridSize - 1) { playerX++; playerY++; } break;
             default:
                 Console.WriteLine("Invalid move. Use w, a, s, d, q, e, z, or c.");
-                break;
+                return; // Don't consume fuel for invalid moves
+        }
+
+        // Only consume fuel if the player actually moved
+        if (originalX != playerX || originalY != playerY)
+        {
+            ConsumeFuel("regular");
         }
 
         // Check if player has moved onto an enemy.
@@ -737,18 +772,18 @@ class JetFighterGame
     private void EnemyAttack(EnemyJet enemy)
     {
         // Increase base attack chance
-        double attackChance = 0.75; // From 0.6
+        double attackChance = 0.8; // From 0.75
         
         // Stealth enemies harder to detect but more deadly when they attack
         if (enemy is StealthEnemyJet) 
         {
-            attackChance = 0.6; // From 0.4
+            attackChance = 0.7; // From 0.6
         }
         
         // Advanced enemies are more accurate
         if (enemy is AdvancedEnemyJet)
         {
-            attackChance = 0.85;
+            attackChance = 0.9; // From 0.85
         }
         
         // Apply weather effects to attack chance
@@ -756,13 +791,13 @@ class JetFighterGame
         
         if (random.NextDouble() <= attackChance)
         {
-            // Increase damage range
-            int baseDamage = enemy is BasicEnemyJet ? random.Next(1, 3) : 
-                             enemy is AdvancedEnemyJet ? random.Next(2, 4) :
-                             random.Next(3, 5); // Stealth jets do most damage
+            // Increase damage range for more challenge
+            int baseDamage = enemy is BasicEnemyJet ? random.Next(1, 4) : // Increased upper bound
+                             enemy is AdvancedEnemyJet ? random.Next(2, 5) : // Increased upper bound
+                             random.Next(3, 6); // Stealth jets do most damage, increased upper bound
             
-            // Critical hit chance
-            bool isCrit = random.NextDouble() < 0.2;
+            // Critical hit chance increased
+            bool isCrit = random.NextDouble() < 0.25; // From 0.2
             int damage = isCrit ? baseDamage * 2 : baseDamage;
             
             Console.WriteLine($"Enemy {enemy.GetType().Name} hits you for {damage} damage!" + 
@@ -782,25 +817,162 @@ class JetFighterGame
     
     private void ConsumeFuel(string maneuver)
     {
-        int consumption = maneuver switch {
-            "afterburner" => 5,
-            "climb" => 3,
-            "turn" => 2,
-            _ => 1 // Regular movement
+        // Base consumption rate
+        int consumption = 1;
+        
+        // Add consumption based on maneuver
+        consumption += maneuver switch {
+            "afterburner" => 4,
+            "climb" => 2,
+            "turn" => 1,
+            _ => 0
         };
+        
+        // Add consumption based on speed
+        if (Velocity > MaxVelocity * 0.8) consumption += 1;
+        
+        // Add consumption based on altitude - higher is more efficient for cruising
+        if (playerAltitude == 0) consumption += 1; // Low altitude is inefficient
+        else if (playerAltitude == 3) consumption -= 1; // High altitude is efficient for cruising
+        
+        // If afterburner is on, double the consumption but also increase speed
+        if (afterburnerEnabled)
+        {
+            consumption *= 2;
+            // Speed boost logic would be here
+        }
         
         Fuel -= consumption;
         if (Fuel <= 0)
         {
             Fuel = 0;
-            // Handle out of fuel - emergency landing or crash
+            HandlePlayerOutOfFuel();
         }
+    }
+
+    private void HandlePlayerOutOfFuel()
+    {
+        Console.WriteLine("\n*** WARNING: OUT OF FUEL! EMERGENCY LANDING REQUIRED! ***");
+        
+        // Forced descent
+        if (playerAltitude > 0)
+        {
+            playerAltitude--;
+            Console.WriteLine($"Altitude dropping! Current altitude: {playerAltitude}");
+        }
+        else
+        {
+            // Check if player is over a landing zone/base
+            if (IsOverLandingZone(playerX, playerY))
+            {
+                Console.WriteLine("Emergency landing successful!");
+                Refuel(50); // Partial refuel after emergency landing
+            }
+            else
+            {
+                // Crashed
+                playerHealth -= 2;
+                Console.WriteLine("CRASH! You've taken damage from emergency landing on hostile terrain!");
+                
+                if (playerHealth <= 0)
+                {
+                    currentState = GameState.Defeat;
+                    HandleGameOver();
+                }
+            }
+        }
+    }
+
+    private bool IsOverLandingZone(int x, int y)
+    {
+        // Add landing zones as needed - for now just check if position has 'B' (base)
+        return grid[x, y] == 'B';
+    }
+
+    private void Refuel(int amount)
+    {
+        Fuel += amount;
+        if (Fuel > MaxFuel)
+            Fuel = MaxFuel;
+        Console.WriteLine($"Refueled! Current fuel: {Fuel}/{MaxFuel}");
     }
 
     public void PowerUp()
     {
         PlayerDamage++;
         Console.WriteLine($"POWER UP! Weapon damage increased to x{PlayerDamage}");
+    }
+
+    public void ProcessPlayerAction(string action)
+    {
+        switch (action.ToLower())
+        {
+            case "r": // Refuel if over base or near tanker
+                TryRefuel();
+                break;
+            case "b": // Changed from "a" to "b" for afterburner
+                ToggleAfterburner();
+                break;
+            // Add other commands as needed
+        }
+    }
+
+    private void TryRefuel()
+    {
+        // Check if player is on an airbase
+        if (grid[playerX, playerY] == 'B')
+        {
+            Console.WriteLine("Refueling at airbase...");
+            Refuel(MaxFuel); // Full refuel
+            return;
+        }
+        
+        // Check if player is adjacent to a tanker
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                int nx = playerX + dx;
+                int ny = playerY + dy;
+                
+                if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize && grid[nx, ny] == 'T')
+                {
+                    Console.WriteLine("Mid-air refueling from tanker...");
+                    Refuel(MaxFuel / 2); // Half tank from mid-air refueling
+                    return;
+                }
+            }
+        }
+        
+        Console.WriteLine("No refueling source nearby.");
+    }
+
+    private void ToggleAfterburner()
+    {
+        afterburnerEnabled = !afterburnerEnabled;
+        Console.WriteLine(afterburnerEnabled ? 
+            "Afterburner ENGAGED! Speed increased but fuel consumption is higher." : 
+            "Afterburner DISENGAGED. Normal fuel consumption resumed.");
+    }
+
+    public void ChangeAltitude(bool increase)
+    {
+        if (increase && playerAltitude < 3)
+        {
+            playerAltitude++;
+            ConsumeFuel("climb");
+            Console.WriteLine($"Climbing to altitude {playerAltitude}");
+        }
+        else if (!increase && playerAltitude > 0)
+        {
+            playerAltitude--;
+            Console.WriteLine($"Descending to altitude {playerAltitude}");
+            // Descending uses less fuel, no consumption
+        }
+        else
+        {
+            Console.WriteLine("Cannot change altitude further in that direction.");
+        }
     }
 }
 
@@ -862,13 +1034,30 @@ class Program
 
         while (true)
         {
-            Console.Write("\nEnter move (w/a/s/d/q/e/z/c): ");
+            Console.Write("\nEnter move or action: ");
             string? input = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(input))
                 continue;
 
-            game.MovePlayer(input);
-            game.MoveEnemies(); // This now includes UpdateWeather and UpdateRadar
+            // Process action commands
+            if (input == "r" || input == "b") // Changed from "a" to "b"
+            {
+                game.ProcessPlayerAction(input);
+            }
+            else if (input == "u") // Climb
+            {
+                game.ChangeAltitude(true);
+            }
+            else if (input == "j") // Descend
+            {
+                game.ChangeAltitude(false);
+            }
+            else // Movement commands
+            {
+                game.MovePlayer(input);
+            }
+            
+            game.MoveEnemies();
             game.DisplayGrid();
         }
     }
