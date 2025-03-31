@@ -82,7 +82,7 @@ class BasicEnemyJet : EnemyJet
     {
         this.game = game;
         Health = 2;     // Increase from 1 to 2
-        Symbol = 'B';
+        Symbol = 'E';  // Changed from 'B' to 'E' for Enemy
     }
 
     public override int ScoreValue => 100;
@@ -260,6 +260,8 @@ class JetFighterGame
 
     private bool afterburnerEnabled = false;
 
+    private List<(int, int)> basePositions = new List<(int, int)>();
+
     public JetFighterGame()
     {
         grid = new char[gridSize, gridSize];
@@ -348,6 +350,7 @@ class JetFighterGame
         {
             var (x, y) = GenerateRandomPosition();
             grid[x, y] = 'B'; // B for Base/airfield
+            basePositions.Add((x, y));
         }
 
         // Add mid-air refueling tankers (1 of them) that move slowly
@@ -920,7 +923,7 @@ class JetFighterGame
     private void TryRefuel()
     {
         // Check if player is on an airbase
-        if (grid[playerX, playerY] == 'B')
+        if (basePositions.Contains((playerX, playerY)))
         {
             Console.WriteLine("Refueling at airbase...");
             Refuel(MaxFuel); // Full refuel
