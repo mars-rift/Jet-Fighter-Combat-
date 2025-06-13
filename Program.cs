@@ -836,7 +836,7 @@ class JetFighterGame
         
         // Add consumption based on altitude - higher is more efficient for cruising
         if (playerAltitude == 0) consumption += 1; // Low altitude is inefficient
-        else if (playerAltitude == 3) consumption -= 1; // High altitude is efficient for cruising
+        else if (playerAltitude == 3) consumption = Math.Max(1, consumption - 1); // High altitude is efficient for cruising, but always consume at least 1 fuel
         
         // If afterburner is on, double the consumption but also increase speed
         if (afterburnerEnabled)
