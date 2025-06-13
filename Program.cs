@@ -477,12 +477,11 @@ class JetFighterGame
         
         Console.WriteLine($"\nAltitude: {playerAltitude}  Weapons: Missiles ({missileAmmo}) Guns ({gunAmmo})");
         Console.WriteLine($"Weather: {currentWeather}  Damage Multiplier: x{PlayerDamage}");
-        
-        // Always display controls
+          // Always display controls
         Console.WriteLine("\n\nCONTROLS:");
         Console.WriteLine("Movement: w/a/s/d/q/e/z/c");
         Console.WriteLine("Actions: r (refuel), b (afterburner), u (climb), j (descend)");
-        Console.WriteLine("Game: s (save game), l (load game), m (show missions)");
+        Console.WriteLine("Game: v (save game), l (load game), m (show missions)");
         
         // Display map legend
         Console.WriteLine("\nMAP LEGEND:");
@@ -942,8 +941,7 @@ class JetFighterGame
                 break;
             case "b": // Changed from "a" to "b" for afterburner
                 ToggleAfterburner();
-                break;
-            case "s": // Save game
+                break;            case "v": // Save game (changed from 's' to 'v' to avoid conflict with move south)
                 SaveGame();
                 break;
             case "l": // Load game
@@ -1261,10 +1259,8 @@ class Program
             Console.Write("\nEnter move or action: ");
             string? input = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(input))
-                continue;
-
-            // Process action commands
-            if (input == "r" || input == "b" || input == "s" || input == "l" || input == "m")
+                continue;            // Process action commands
+            if (input == "r" || input == "b" || input == "v" || input == "l" || input == "m")
             {
                 game.ProcessPlayerAction(input);
             }

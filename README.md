@@ -61,6 +61,11 @@ Your jet is represented by the 'F' symbol on the grid. Navigate through the airs
   - `u` - Climb (increase altitude)
   - `j` - Descend (decrease altitude)
 
+- **Game Commands**:
+  - `v` - Save game
+  - `l` - Load game
+  - `m` - Show missions
+
 ### Map Legend
 
 - `F` - Your fighter jet
