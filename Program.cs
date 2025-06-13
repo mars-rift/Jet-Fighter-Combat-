@@ -1,9 +1,32 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
+using System.Text.Json;
 
 enum EnemyState { Patrolling, Chasing, Retreating }
 enum Weather { Clear, Cloudy, Storm }
+
+class Mission
+{
+    public string Objective { get; }
+    public bool IsComplete { get; private set; }
+    public int RewardPoints { get; }
+    
+    public Mission(string objective, int rewardPoints)
+    {
+        Objective = objective;
+        RewardPoints = rewardPoints;
+        IsComplete = false;
+    }
+    
+    public void Complete()
+    {
+        IsComplete = true;
+        Console.WriteLine($"Mission complete: {Objective}");
+        Console.WriteLine($"Reward: {RewardPoints} points");
+    }
+}
 
 abstract class EnemyJet
 {
@@ -234,6 +257,9 @@ class JetFighterGame
     private char playerJet = 'F';
     private int playerHealth = 5;
     private int score = 0;
+    private List<Mission> activeMissions = new List<Mission>();
+    private List<Mission> completedMissions = new List<Mission>();
+    private int missionCounter = 0;
 
     private int _playerDamage = 1;
     public int PlayerDamage 
@@ -456,6 +482,7 @@ class JetFighterGame
         Console.WriteLine("\n\nCONTROLS:");
         Console.WriteLine("Movement: w/a/s/d/q/e/z/c");
         Console.WriteLine("Actions: r (refuel), b (afterburner), u (climb), j (descend)");
+        Console.WriteLine("Game: s (save game), l (load game), m (show missions)");
         
         // Display map legend
         Console.WriteLine("\nMAP LEGEND:");
@@ -916,6 +943,15 @@ class JetFighterGame
             case "b": // Changed from "a" to "b" for afterburner
                 ToggleAfterburner();
                 break;
+            case "s": // Save game
+                SaveGame();
+                break;
+            case "l": // Load game
+                LoadGame();
+                break;
+            case "m": // Show missions
+                DisplayMissions();
+                break;
             // Add other commands as needed
         }
     }
@@ -977,9 +1013,214 @@ class JetFighterGame
             Console.WriteLine("Cannot change altitude further in that direction.");
         }
     }
+
+    public void SaveGame()
+    {
+        var saveData = new Dictionary<string, object>
+        {
+            { "playerX", playerX },
+            { "playerY", playerY },
+            { "playerHealth", playerHealth },
+            { "score", score },
+            { "playerAltitude", playerAltitude },
+            { "missileAmmo", missileAmmo },
+            { "gunAmmo", gunAmmo },
+            { "fuel", Fuel },
+            { "playerDamage", PlayerDamage },
+            { "currentWeather", (int)currentWeather }
+        };
+
+        string json = JsonSerializer.Serialize(saveData);
+        string savePath = "save.json";
+        File.WriteAllText(savePath, json);
+        Console.WriteLine($"Game saved to {savePath}");
+    }
+
+    public bool LoadGame()
+    {
+        string savePath = "save.json";
+        if (!File.Exists(savePath))
+        {
+            Console.WriteLine("No save file found!");
+            return false;
+        }
+
+        try
+        {
+            string json = File.ReadAllText(savePath);
+            var saveData = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+
+            if (saveData != null)
+            {
+                playerX = saveData["playerX"].GetInt32();
+                playerY = saveData["playerY"].GetInt32();
+                playerHealth = saveData["playerHealth"].GetInt32();
+                score = saveData["score"].GetInt32();
+                playerAltitude = saveData["playerAltitude"].GetInt32();
+                missileAmmo = saveData["missileAmmo"].GetInt32();
+                gunAmmo = saveData["gunAmmo"].GetInt32();
+                Fuel = saveData["fuel"].GetInt32();
+                PlayerDamage = saveData["playerDamage"].GetInt32();
+                currentWeather = (Weather)saveData["currentWeather"].GetInt32();
+            }
+            else
+            {
+                Console.WriteLine("Invalid save data!");
+                return false;
+            }
+
+            Console.WriteLine("Game loaded successfully!");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading game: {ex.Message}");
+            return false;
+        }
+    }
+
+    private void GenerateNewMission()
+    {
+        string[] missionTypes = {
+            "Destroy an enemy jet",
+            "Visit all bases",
+            "Reach maximum altitude",
+            "Perform mid-air refueling",
+            "Survive a storm"
+        };
+        
+        int rewardPoints = random.Next(50, 201); // 50-200 points
+        string objective = missionTypes[random.Next(missionTypes.Length)];
+        string missionName = $"Mission #{++missionCounter}: {objective}";
+        
+        Mission newMission = new Mission(missionName, rewardPoints);
+        activeMissions.Add(newMission);
+        
+        Console.WriteLine($"\nNew mission available: {missionName}");
+        Console.WriteLine($"Reward: {rewardPoints} points");
+    }
+
+    public void CheckMissionProgress()
+    {
+        foreach (var mission in activeMissions.ToList())
+        {
+            // Check mission completion based on objective
+            bool completed = false;
+            
+            if (mission.Objective.Contains("Destroy an enemy jet") && 
+                enemyJets.Count < 3) // Started with 3 enemies
+            {
+                completed = true;
+            }
+            else if (mission.Objective.Contains("Visit all bases"))
+            {
+                bool visitedAll = true;
+                foreach (var basePos in basePositions)
+                {
+                    if (playerX != basePos.Item1 || playerY != basePos.Item2)
+                    {
+                        visitedAll = false;
+                        break;
+                    }
+                }
+                completed = visitedAll;
+            }
+            else if (mission.Objective.Contains("Reach maximum altitude") &&
+                    playerAltitude == 3)
+            {
+                completed = true;
+            }
+            else if (mission.Objective.Contains("Perform mid-air refueling"))
+            {
+                // Check if adjacent to a tanker (T)
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        int nx = playerX + dx;
+                        int ny = playerY + dy;
+                        
+                        if (nx >= 0 && nx < gridSize && 
+                            ny >= 0 && ny < gridSize && 
+                            grid[nx, ny] == 'T')
+                        {
+                            completed = true;
+                            break;
+                        }
+                    }
+                    if (completed) break;
+                }
+            }
+            else if (mission.Objective.Contains("Survive a storm") &&
+                    currentWeather == Weather.Storm)
+            {
+                completed = true;
+            }
+            
+            if (completed)
+            {
+                CompleteActiveMission(mission);
+            }
+        }
+    }
+
+    private void CompleteActiveMission(Mission mission)
+    {
+        activeMissions.Remove(mission);
+        completedMissions.Add(mission);
+        mission.Complete();
+        score += mission.RewardPoints;
+        
+        // Maybe generate a new mission
+        if (activeMissions.Count < 3 && random.NextDouble() < 0.7) // 70% chance
+        {
+            GenerateNewMission();
+        }
+    }
+
+    public void DisplayMissions()
+    {
+        Console.WriteLine("\n--- ACTIVE MISSIONS ---");
+        if (activeMissions.Count == 0)
+        {
+            Console.WriteLine("No active missions.");
+        }
+        else
+        {
+            foreach (var mission in activeMissions)
+            {
+                Console.WriteLine($"* {mission.Objective} (Reward: {mission.RewardPoints} points)");
+            }
+        }
+        
+        Console.WriteLine("\n--- COMPLETED MISSIONS ---");
+        if (completedMissions.Count == 0)
+        {
+            Console.WriteLine("No completed missions.");
+        }
+        else
+        {
+            foreach (var mission in completedMissions)
+            {
+                Console.WriteLine($"* {mission.Objective} (Reward: {mission.RewardPoints} points)");
+            }
+        }
+        
+        Console.WriteLine("\nPress any key to continue...");
+        Console.ReadKey();
+    }
+    
+    public void InitializeMissions()
+    {
+        // Start with 1-2 missions
+        int initialMissions = random.Next(1, 3);
+        for (int i = 0; i < initialMissions; i++)
+        {
+            GenerateNewMission();
+        }
+    }
 }
 
-// New class for weapons
 class Weapon
 {
     public string Name { get; }
@@ -1006,33 +1247,13 @@ class Weapon
     }
 }
 
-class Mission
-{
-    public string Objective { get; }
-    public bool IsComplete { get; private set; }
-    public int RewardPoints { get; }
-    
-    public Mission(string objective, int rewardPoints)
-    {
-        Objective = objective;
-        RewardPoints = rewardPoints;
-        IsComplete = false;
-    }
-    
-    public void Complete()
-    {
-        IsComplete = true;
-        Console.WriteLine($"Mission complete: {Objective}");
-        Console.WriteLine($"Reward: {RewardPoints} points");
-    }
-}
-
 class Program
 {
     static void Main(string[] args)
     {
         JetFighterGame game = new JetFighterGame();
         game.UpdateRadar(); // Add initial radar update
+        game.InitializeMissions(); // Initialize missions
         game.DisplayGrid();
 
         while (true)
@@ -1043,7 +1264,7 @@ class Program
                 continue;
 
             // Process action commands
-            if (input == "r" || input == "b") // Changed from "a" to "b"
+            if (input == "r" || input == "b" || input == "s" || input == "l" || input == "m")
             {
                 game.ProcessPlayerAction(input);
             }
@@ -1061,6 +1282,7 @@ class Program
             }
             
             game.MoveEnemies();
+            game.CheckMissionProgress();
             game.DisplayGrid();
         }
     }
