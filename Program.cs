@@ -343,84 +343,6 @@ class F16Falcon : EnemyJet
     }
 }
 
-class AdvancedEnemyJet : EnemyJet
-{
-    private readonly JetFighterGame gameInstance;
-    private EnemyState state = EnemyState.Patrolling;
-
-    public AdvancedEnemyJet(int x, int y, JetFighterGame game) : base(x, y)
-    {
-        gameInstance = game;
-        Symbol = 'A';
-        Health = 4;      // Increase from 2 to 4
-        MaxVelocity = 3; // Faster than basic
-        TurnRate = 60;   // More maneuverable
-    }
-
-    public override int ScoreValue => 150;
-
-    public override void Move(int playerX, int playerY, char[,] grid)
-    {
-        switch (state)
-        {
-            case EnemyState.Patrolling:
-                RandomMove(grid);
-                if (IsPlayerClose(playerX, playerY))
-                    state = EnemyState.Chasing;
-                break;
-            case EnemyState.Chasing:
-                var step = gameInstance.AStarStep(X, Y, playerX, playerY, grid);
-                if (step != null)
-                {
-                    X = step.Value.nextX;
-                    Y = step.Value.nextY;
-                }
-                if (Health < 1)
-                    state = EnemyState.Retreating;
-                break;
-            case EnemyState.Retreating:
-                RetreatMove(playerX, playerY, grid);
-                break;
-        }
-        ConsumeFuel("regular");
-    }
-
-    private bool IsPlayerClose(int playerX, int playerY) =>
-        Math.Abs(X - playerX) <= 5 && Math.Abs(Y - playerY) <= 5;
-
-    private void RandomMove(char[,] grid)
-    {
-        Random rnd = new Random();
-        int direction = rnd.Next(0, 8);
-        int[] dx = { -1, 0, 1, -1, 1, -1, 0, 1 };
-        int[] dy = { -1, -1, -1, 0, 0, 1, 1, 1 };
-        int newX = X + dx[direction];
-        int newY = Y + dy[direction];
-        if (newX >= 0 && newX < grid.GetLength(0) &&
-            newY >= 0 && newY < grid.GetLength(1))
-        {
-            X = newX;
-            Y = newY;
-        }
-    }
-
-    private void RetreatMove(int playerX, int playerY, char[,] grid)
-    {
-        int dx = X - playerX;
-        int dy = Y - playerY;
-        if (dx != 0) dx /= Math.Abs(dx);
-        if (dy != 0) dy /= Math.Abs(dy);
-        int newX = X + dx;
-        int newY = Y + dy;
-        if (newX >= 0 && newX < grid.GetLength(0) &&
-            newY >= 0 && newY < grid.GetLength(1))
-        {
-            X = newX;
-            Y = newY;
-        }
-    }
-}
-
 class Su27Flanker : EnemyJet
 {
     private readonly JetFighterGame game;
@@ -830,6 +752,7 @@ class JetFighterGame
     private List<Mission> activeMissions = new List<Mission>();
     private List<Mission> completedMissions = new List<Mission>();
     private int missionCounter = 0;
+    private Queue<string> messageQueue = new Queue<string>(); // Message queue for delayed display
 
     private int _playerDamage = 1;
     public int PlayerDamage 
@@ -857,8 +780,55 @@ class JetFighterGame
     public int MaxFuel { get; protected set; }
 
     private bool afterburnerEnabled = false;
-
     private List<(int, int)> basePositions = new List<(int, int)>();
+
+    // Message system methods
+    private void AddMessage(string message, ConsoleColor color = ConsoleColor.White, bool urgent = false)
+    {
+        messageQueue.Enqueue($"{color}|{message}");
+        if (urgent)
+        {
+            DisplayMessages();
+        }
+    }
+
+    private void DisplayMessages()
+    {
+        while (messageQueue.Count > 0)
+        {
+            var message = messageQueue.Dequeue();
+            var parts = message.Split('|');
+            if (parts.Length == 2 && Enum.TryParse<ConsoleColor>(parts[0], out var color))
+            {
+                Console.ForegroundColor = color;
+                Console.WriteLine($">>> {parts[1]}");
+                Console.ResetColor();
+                System.Threading.Thread.Sleep(800); // Pause for dramatic effect
+            }
+        }
+    }
+
+    private void DisplayTypingMessage(string message, ConsoleColor color = ConsoleColor.White, int delayMs = 30)
+    {
+        Console.ForegroundColor = color;
+        Console.Write(">>> ");
+        foreach (char c in message)
+        {
+            Console.Write(c);
+            System.Threading.Thread.Sleep(delayMs);
+        }
+        Console.WriteLine();
+        Console.ResetColor();
+        System.Threading.Thread.Sleep(500);
+    }
+
+    private void WaitForInput(string prompt = "Press any key to continue...")
+    {
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine($"\n{prompt}");
+        Console.ResetColor();
+        Console.ReadKey(true);
+    }
 
     public JetFighterGame()
     {
@@ -992,22 +962,32 @@ class JetFighterGame
     {
         Console.Clear();
         
-        // Show radar information
-        Console.WriteLine("RADAR STATUS:");
-        foreach (var enemy in enemyJets.Where(e => e.IsDetected))
+        // Show compact radar information with better formatting
+        Console.WriteLine("┌─ RADAR STATUS ─────────────────────────────────────────────────────┐");
+        var detectedEnemies = enemyJets.Where(e => e.IsDetected).ToList();
+        if (detectedEnemies.Any())
         {
-            string stealthInfo = "";
-            if (enemy is F22Raptor raptor && raptor.IsInStealthMode())
-                stealthInfo = " [STEALTH]";
-                
-            Console.WriteLine($"{enemy.AircraftName} at ({enemy.X},{enemy.Y}) | " +
-                             $"Alt: {enemy.Altitude} | Health: {enemy.Health}/{enemy.MaxHealth} | " +
-                             $"State: {enemy.CurrentState}{stealthInfo}");
+            foreach (var enemy in detectedEnemies)
+            {
+                string stealthInfo = "";
+                if (enemy is F22Raptor raptor && raptor.IsInStealthMode())
+                    stealthInfo = " [STEALTH]";
+                    
+                Console.WriteLine($"│ {enemy.AircraftName} at ({enemy.X:D2},{enemy.Y:D2}) Alt:{enemy.Altitude} HP:{enemy.Health}/{enemy.MaxHealth} {enemy.CurrentState}{stealthInfo}");
+            }
         }
+        else
+        {
+            Console.WriteLine("│ No enemy contacts detected");
+        }
+        Console.WriteLine("└────────────────────────────────────────────────────────────────────┘");
+        Console.WriteLine();
         
-        // Show grid with altitude indicators
+        // Show grid with better formatting
+        Console.WriteLine("    " + string.Join("", Enumerable.Range(0, gridSize).Select(i => (i % 10).ToString() + " ")));
         for (int i = 0; i < gridSize; i++)
         {
+            Console.Write($"{i:D2}: ");
             for (int j = 0; j < gridSize; j++)
             {
                 // Display different colors based on altitude
@@ -1043,8 +1023,10 @@ class JetFighterGame
             }
             Console.WriteLine();
         }
+        Console.WriteLine();
         
-        Console.WriteLine($"Player Health: {playerHealth}  Score: {score}");
+        // Compact status display
+        Console.WriteLine($"Health: {playerHealth}  Score: {score}  Alt: {playerAltitude}  Weather: {currentWeather}");
         
         // Show fuel status with color coding
         Console.Write("Fuel: ");
@@ -1058,29 +1040,13 @@ class JetFighterGame
         Console.Write($"{Fuel}/{MaxFuel}");
         Console.ResetColor();
         
-        // Show afterburner status
-        Console.Write($"  Afterburner: {(afterburnerEnabled ? "ON" : "OFF")}");
+        Console.WriteLine($"  Afterburner: {(afterburnerEnabled ? "ON" : "OFF")}  Weapons: M{missileAmmo} G{gunAmmo}  DMG: x{PlayerDamage}");
         
-        Console.WriteLine($"\nAltitude: {playerAltitude}  Weapons: Missiles ({missileAmmo}) Guns ({gunAmmo})");
-        Console.WriteLine($"Weather: {currentWeather}  Damage Multiplier: x{PlayerDamage}");
-          // Always display controls
-        Console.WriteLine("\n\nCONTROLS:");
-        Console.WriteLine("Movement: w/a/s/d/q/e/z/c");
-        Console.WriteLine("Actions: r (refuel), b (afterburner), u (climb), j (descend)");
-        Console.WriteLine("Game: v (save game), l (load game), m (show missions)");
+        // Compact controls display
+        Console.WriteLine("\nControls: w/a/s/d/q/e/z/c=move | r=refuel | b=afterburner | u/j=altitude | v/l=save/load | m=missions");
         
-        // Display map legend
-        Console.WriteLine("\nMAP LEGEND:");
-        Console.WriteLine("P - Your fighter jet");
-        Console.WriteLine("B - Base/airfield (refuel here)");
-        Console.WriteLine("T - Tanker aircraft (refuel when adjacent)");
-        Console.WriteLine("F - F-16 Fighting Falcon");
-        Console.WriteLine("S - Su-27 Flanker");
-        Console.WriteLine("R - F-22 Raptor (Stealth Fighter)");
-        Console.WriteLine("\nAIRCRAFT INFO:");
-        Console.WriteLine("F-16: Multi-role fighter with advanced radar");
-        Console.WriteLine("Su-27: High-altitude interceptor, very aggressive");
-        Console.WriteLine("F-22: Stealth fighter with advanced AI");
+        // Compact legend
+        Console.WriteLine("Legend: P=You | F=F-16 | S=Su-27 | R=F-22 | B=Base | T=Tanker");
     }
 
     private void EndGame(string message)
@@ -1097,7 +1063,26 @@ class JetFighterGame
 
     private void ProcessCombat(EnemyJet enemy)
     {
-        Console.WriteLine($"\nCombat engaged with {enemy.GetType().Name}!");
+        Console.Clear();
+        DisplayTypingMessage($"🚨 ENEMY CONTACT! {enemy.AircraftName} detected at {enemy.X},{enemy.Y}!", ConsoleColor.Red);
+        
+        double distance = Math.Sqrt(Math.Pow(enemy.X - playerX, 2) + Math.Pow(enemy.Y - playerY, 2));
+        string distanceDesc = distance switch
+        {
+            <= 2 => "POINT BLANK RANGE",
+            <= 4 => "Close range",
+            <= 8 => "Medium range",
+            _ => "Long range"
+        };
+        
+        DisplayTypingMessage($"Distance: {distance:F1} units ({distanceDesc})", ConsoleColor.Yellow);
+        DisplayTypingMessage($"Enemy Status: {enemy.Health}/{enemy.MaxHealth} HP | State: {enemy.CurrentState}", ConsoleColor.Cyan);
+        
+        if (enemy.CurrentState == EnemyState.Chasing)
+            DisplayTypingMessage("WARNING: Enemy is actively pursuing!", ConsoleColor.Red);
+        else if (enemy.CurrentState == EnemyState.Flanking)
+            DisplayTypingMessage("CAUTION: Enemy attempting flanking maneuver!", ConsoleColor.Yellow);
+        
         DisplayCombatOptions(enemy);
         
         string? action = Console.ReadLine();
@@ -1105,42 +1090,57 @@ class JetFighterGame
         {
             case "1": // Fire missile
                 if (TryFireWeapon("Missile", enemy, 7))
-                    Console.WriteLine("Missile away!");
+                {
+                    DisplayTypingMessage("🚀 MISSILE AWAY! Tracking target...", ConsoleColor.Yellow, 50);
+                    System.Threading.Thread.Sleep(1000);
+                }
                 break;
             case "2": // Gun attack
                 if (TryFireWeapon("Gun", enemy, 3))
-                    Console.WriteLine("Guns firing!");
+                {
+                    DisplayTypingMessage("💥 GUNS GUNS GUNS! Engaging with cannon!", ConsoleColor.Red, 40);
+                    System.Threading.Thread.Sleep(800);
+                }
                 break;
             case "3": // Evasive maneuver
+                DisplayTypingMessage("🌪️ Executing evasive maneuvers!", ConsoleColor.Green, 40);
                 PerformEvasiveManeuver();
                 break;
             default:
-                Console.WriteLine("Combat opportunity missed!");
+                DisplayTypingMessage("❌ Combat opportunity missed! No action taken.", ConsoleColor.DarkRed);
                 break;
         }
         
         // Enemy counterattack with realistic factors
         if (enemy.Health > 0)
         {
+            System.Threading.Thread.Sleep(500);
+            DisplayTypingMessage("⚠️ Enemy counterattack incoming!", ConsoleColor.Red);
             EnemyAttack(enemy);
         }
         else
         {
-            Console.WriteLine($"{enemy.GetType().Name} destroyed!");
+            DisplayTypingMessage($"💀 {enemy.AircraftName} DESTROYED! Excellent shooting, pilot!", ConsoleColor.Green, 40);
+            DisplayTypingMessage($"🏆 +{enemy.ScoreValue} points earned", ConsoleColor.Yellow);
+            
             enemyJets.Remove(enemy);
             score += enemy.ScoreValue;
             
             // Random chance for power-up when defeating enemy
             if (random.NextDouble() < 0.25) // 25% chance
             {
+                System.Threading.Thread.Sleep(500);
                 PowerUp();
             }
             
             if (enemyJets.Count == 0)
             {
                 currentState = GameState.Victory;
+                DisplayTypingMessage("🎉 ALL ENEMIES NEUTRALIZED! MISSION ACCOMPLISHED!", ConsoleColor.Green, 50);
             }
         }
+        
+        WaitForInput();
     }
 
     public void MovePlayer(string direction)
@@ -1193,9 +1193,19 @@ class JetFighterGame
         UpdateWeather();
         UpdateRadar();
 
+        // Clear enemy positions from grid before moving
+        foreach (var jet in enemyJets)
+        {
+            if (grid[jet.X, jet.Y] == jet.Symbol)
+                grid[jet.X, jet.Y] = '.';
+        }
+
+        // Move each enemy and check for collisions
         foreach (var jet in enemyJets.ToList())
         {
-            grid[jet.X, jet.Y] = '.';
+            int oldX = jet.X;
+            int oldY = jet.Y;
+            
             jet.Move(playerX, playerY, grid);
 
             // Individual enemy collision with player triggers combat.
@@ -1208,21 +1218,31 @@ class JetFighterGame
                     return;
                 }
             }
-            grid[jet.X, jet.Y] = jet.Symbol;
+            
+            // Update grid with new enemy position (only if enemy is still alive)
+            if (enemyJets.Contains(jet))
+            {
+                // Make sure we don't overwrite the player position
+                if (!(jet.X == playerX && jet.Y == playerY))
+                grid[jet.X, jet.Y] = jet.Symbol;
+            }
         }
 
-        // Define adjacentEnemies before using it
+        // Check for coordinated attacks from adjacent enemies
         var adjacentEnemies = enemyJets.FindAll(e => Math.Abs(e.X - playerX) <= 1 && Math.Abs(e.Y - playerY) <= 1);
         
         if (adjacentEnemies.Count >= 2)
         {
             int totalDamage = adjacentEnemies.Sum(e =>
             {
-                int baseDamage = random.Next(1, 6);
-                bool isCrit = random.NextDouble() < 0.25;
+                int baseDamage = random.Next(1, 4); // Reduced from 1-6 to be less punishing
+                bool isCrit = random.NextDouble() < 0.15; // Reduced crit chance
                 return isCrit ? baseDamage * 2 : baseDamage;
             });
-            Console.WriteLine($"\nEnemy coordinated attack! You took {totalDamage} damage.");
+            
+            DisplayTypingMessage("🚨 MULTIPLE BOGEYS! Coordinated enemy attack detected!", ConsoleColor.Red, 50);
+            DisplayTypingMessage($"💥 Combined assault deals {totalDamage} damage!", ConsoleColor.Red);
+            
             playerHealth -= totalDamage;
             if (playerHealth <= 0)
             {
@@ -1230,8 +1250,19 @@ class JetFighterGame
                 HandleGameOver();
                 return;
             }
+            
+            WaitForInput("Multiple enemies engaged! Press any key to continue...");
         }
-        grid[playerX, playerY] = playerJet;
+        
+        // Display any queued messages
+        if (messageQueue.Count > 0)
+        {
+            DisplayMessages();
+        }
+        
+        // Ensure player position is correctly marked
+        if (grid[playerX, playerY] != playerJet)
+            grid[playerX, playerY] = playerJet;
     }
 
     private void HandleGameOver()
@@ -1290,7 +1321,25 @@ class JetFighterGame
             {
                 currentWeather = newWeather;
                 weatherTurns = 0;
-                Console.WriteLine($"Weather changing to: {currentWeather}");
+                
+                string weatherMessage = currentWeather switch
+                {
+                    Weather.Storm => "⛈️ STORM FRONT MOVING IN! Visibility severely reduced!",
+                    Weather.Cloudy => "☁️ Cloud cover increasing. Reduced visibility conditions.",
+                    Weather.Clear => "☀️ Weather clearing up. Optimal visibility restored."
+                };
+                
+                AddMessage(weatherMessage, ConsoleColor.Yellow, true);
+                
+                // Additional weather effects messaging
+                if (currentWeather == Weather.Storm)
+                {
+                    AddMessage("⚠️ Storm conditions: -50% detection range, -30% accuracy!", ConsoleColor.Red);
+                }
+                else if (currentWeather == Weather.Cloudy)
+                {
+                    AddMessage("⚠️ Cloudy conditions: -20% detection range, -10% accuracy.", ConsoleColor.Yellow);
+                }
             }
         }
         
@@ -1314,291 +1363,6 @@ class JetFighterGame
                 break;
         }
     }
-    
-    private bool TryFireWeapon(string weaponType, EnemyJet enemy, int baseDamage)
-    {
-        int ammo = weaponType == "Missile" ? missileAmmo : gunAmmo;
-        if (ammo <= 0)
-        {
-            Console.WriteLine($"Out of {weaponType.ToLower()} ammo!");
-            return false;
-        }
-        
-        // Calculate hit chance based on weather, altitude and distance
-        double hitChance = 0.65 * accuracyModifier;
-        double distance = Math.Sqrt(Math.Pow(enemy.X - playerX, 2) + Math.Pow(enemy.Y - playerY, 2));
-        
-        // Adjust hit chance based on distance
-        if (distance > 5) hitChance -= 0.15;
-        if (distance > 8) hitChance -= 0.15;
-        
-        // Stealth/advanced enemies are harder to hit
-        if (enemy is F22Raptor) hitChance -= 0.25;
-        else if (enemy.CombatExperience > 3) hitChance -= 0.1;
-        
-        // Roll for hit
-        if (random.NextDouble() <= hitChance)
-        {
-            // Use playerDamage as a multiplier for weapon damage
-            int baseDmg = weaponType == "Missile" ? random.Next(4, 7) : random.Next(1, 3);
-            int damage = baseDmg * PlayerDamage; // Using playerDamage here
-            enemy.Health -= damage;
-            Console.WriteLine($"Hit! Enemy {enemy.GetType().Name} took {damage} damage.");
-            
-            // Reduce ammo
-            if (weaponType == "Missile")
-                missileAmmo--;
-            else
-                gunAmmo -= 10;
-            
-            return true;
-        }
-        else
-        {
-            Console.WriteLine($"{weaponType} missed!");
-            
-            if (weaponType == "Missile")
-                missileAmmo--;
-            else
-                gunAmmo -= 5;
-                
-            return false;
-        }
-    }
-    
-    private void PerformEvasiveManeuver()
-    {
-        // Implement evasive maneuver logic
-        Console.WriteLine("Performing evasive maneuver!");
-        
-        // Chance to avoid enemy attacks in the next turn
-        ConsumeFuel("turn");
-        
-        // Move to a random adjacent cell if possible
-        int[] dx = { -1, -1, -1, 0, 0, 1, 1, 1 };
-        int[] dy = { -1, 0, 1, -1, 1, -1, 0, 1 };
-        
-        List<(int, int)> validMoves = new List<(int, int)>();
-        for (int i = 0; i < dx.Length; i++)
-        {
-            int newX = playerX + dx[i];
-            int newY = playerY + dy[i];
-            if (newX >= 0 && newX < gridSize && newY >= 0 && newY < gridSize)
-            {
-                validMoves.Add((newX, newY));
-            }
-        }
-        
-        if (validMoves.Count > 0)
-        {
-            var move = validMoves[random.Next(validMoves.Count)];
-            playerX = move.Item1;
-            playerY = move.Item2;
-            Console.WriteLine("Moved to a new position!");
-        }
-    }
-    
-    private void EnemyAttack(EnemyJet enemy)
-    {
-        // Base attack chance varies by aircraft type and experience
-        double attackChance = 0.7 + (enemy.CombatExperience * 0.05);
-        
-        // F-22 Raptor has higher accuracy
-        if (enemy is F22Raptor)
-        {
-            attackChance = 0.85;
-        }
-        // Su-27 Flanker is also highly accurate
-        else if (enemy is Su27Flanker)
-        {
-            attackChance = 0.82;
-        }
-        // F-16 Falcon has good accuracy
-        else if (enemy is F16Falcon)
-        {
-            attackChance = 0.78;
-        }
-        
-        // Apply weather effects to attack chance
-        attackChance *= accuracyModifier;
-        
-        if (random.NextDouble() <= attackChance)
-        {
-            // Damage varies by aircraft type and experience
-            int baseDamage = enemy switch
-            {
-                F16Falcon => random.Next(2, 5),
-                Su27Flanker => random.Next(3, 6),
-                F22Raptor => random.Next(3, 7),
-                _ => random.Next(1, 4)
-            };
-            
-            // Critical hit chance based on experience
-            bool isCrit = random.NextDouble() < (0.15 + enemy.CombatExperience * 0.02);
-            int damage = isCrit ? baseDamage * 2 : baseDamage;
-            
-            Console.WriteLine($"Enemy {enemy.AircraftName} hits you for {damage} damage!" + 
-                             (isCrit ? " CRITICAL HIT!" : ""));
-            playerHealth -= damage;
-            
-            if (playerHealth <= 0)
-            {
-                currentState = GameState.Defeat;
-            }
-        }
-        else
-        {
-            Console.WriteLine($"Enemy {enemy.AircraftName} missed!");
-        }
-    }
-    
-    private void ConsumeFuel(string maneuver)
-    {
-        // Base consumption rate
-        int consumption = 1;
-        
-        // Add consumption based on maneuver
-        consumption += maneuver switch {
-            "afterburner" => 4,
-            "climb" => 2,
-            "turn" => 1,
-            _ => 0
-        };
-        
-        // Add consumption based on speed
-        if (Velocity > MaxVelocity * 0.8) consumption += 1;
-        
-        // Add consumption based on altitude - higher is more efficient for cruising
-        if (playerAltitude == 0) consumption += 1; // Low altitude is inefficient
-        else if (playerAltitude == 3) consumption = Math.Max(1, consumption - 1); // High altitude is efficient for cruising, but always consume at least 1 fuel
-        
-        // If afterburner is on, double the consumption but also increase speed
-        if (afterburnerEnabled)
-        {
-            consumption *= 2;
-            // Speed boost logic would be here
-        }
-        
-        Fuel -= consumption;
-        if (Fuel <= 0)
-        {
-            Fuel = 0;
-            HandlePlayerOutOfFuel();
-        }
-    }
-
-    private void HandlePlayerOutOfFuel()
-    {
-        Console.WriteLine("\n*** WARNING: OUT OF FUEL! EMERGENCY LANDING REQUIRED! ***");
-        
-        // Forced descent
-        if (playerAltitude > 0)
-        {
-            playerAltitude--;
-            Console.WriteLine($"Altitude dropping! Current altitude: {playerAltitude}");
-        }
-        else
-        {
-            // Check if player is over a landing zone/base
-            if (IsOverLandingZone(playerX, playerY))
-            {
-                Console.WriteLine("Emergency landing successful!");
-                Refuel(50); // Partial refuel after emergency landing
-            }
-            else
-            {
-                // Crashed
-                playerHealth -= 2;
-                Console.WriteLine("CRASH! You've taken damage from emergency landing on hostile terrain!");
-                
-                if (playerHealth <= 0)
-                {
-                    currentState = GameState.Defeat;
-                    HandleGameOver();
-                }
-            }
-        }
-    }
-
-    private bool IsOverLandingZone(int x, int y)
-    {
-        // Add landing zones as needed - for now just check if position has 'B' (base)
-        return grid[x, y] == 'B';
-    }
-
-    private void Refuel(int amount)
-    {
-        Fuel += amount;
-        if (Fuel > MaxFuel)
-            Fuel = MaxFuel;
-        Console.WriteLine($"Refueled! Current fuel: {Fuel}/{MaxFuel}");
-    }
-
-    public void PowerUp()
-    {
-        PlayerDamage++;
-        Console.WriteLine($"POWER UP! Weapon damage increased to x{PlayerDamage}");
-    }
-
-    public void ProcessPlayerAction(string action)
-    {
-        switch (action.ToLower())
-        {
-            case "r": // Refuel if over base or near tanker
-                TryRefuel();
-                break;
-            case "b": // Changed from "a" to "b" for afterburner
-                ToggleAfterburner();
-                break;            case "v": // Save game (changed from 's' to 'v' to avoid conflict with move south)
-                SaveGame();
-                break;
-            case "l": // Load game
-                LoadGame();
-                break;
-            case "m": // Show missions
-                DisplayMissions();
-                break;
-            // Add other commands as needed
-        }
-    }
-
-    private void TryRefuel()
-    {
-        // Check if player is on an airbase
-        if (basePositions.Contains((playerX, playerY)))
-        {
-            Console.WriteLine("Refueling at airbase...");
-            Refuel(MaxFuel); // Full refuel
-            return;
-        }
-        
-        // Check if player is adjacent to a tanker
-        for (int dx = -1; dx <= 1; dx++)
-        {
-            for (int dy = -1; dy <= 1; dy++)
-            {
-                int nx = playerX + dx;
-                int ny = playerY + dy;
-                
-                if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize && grid[nx, ny] == 'T')
-                {
-                    Console.WriteLine("Mid-air refueling from tanker...");
-                    Refuel(MaxFuel / 2); // Half tank from mid-air refueling
-                    return;
-                }
-            }
-        }
-        
-        Console.WriteLine("No refueling source nearby.");
-    }
-
-    private void ToggleAfterburner()
-    {
-        afterburnerEnabled = !afterburnerEnabled;
-        Console.WriteLine(afterburnerEnabled ? 
-            "Afterburner ENGAGED! Speed increased but fuel consumption is higher." : 
-            "Afterburner DISENGAGED. Normal fuel consumption resumed.");
-    }
 
     public void ChangeAltitude(bool increase)
     {
@@ -1606,82 +1370,48 @@ class JetFighterGame
         {
             playerAltitude++;
             ConsumeFuel("climb");
-            Console.WriteLine($"Climbing to altitude {playerAltitude}");
+            
+            string altitudeDesc = playerAltitude switch
+            {
+                1 => "Low altitude (1000ft)",
+                2 => "Medium altitude (5000ft)", 
+                3 => "High altitude (10000ft)",
+                _ => $"Altitude level {playerAltitude}"
+            };
+            
+            DisplayTypingMessage($"⬆️ Climbing to {altitudeDesc}", ConsoleColor.Cyan);
+            DisplayTypingMessage("✈️ Engine power increased - fuel consumption higher during climb.", ConsoleColor.Yellow);
         }
         else if (!increase && playerAltitude > 0)
         {
+            string currentDesc = playerAltitude switch
+            {
+                3 => "High altitude (10000ft)",
+                2 => "Medium altitude (5000ft)",
+                1 => "Low altitude (1000ft)",
+                _ => $"Altitude level {playerAltitude}"
+            };
+            
             playerAltitude--;
-            Console.WriteLine($"Descending to altitude {playerAltitude}");
-            // Descending uses less fuel, no consumption
+            
+            string newDesc = playerAltitude switch
+            {
+                2 => "Medium altitude (5000ft)",
+                1 => "Low altitude (1000ft)", 
+                0 => "Ground level",
+                _ => $"Altitude level {playerAltitude}"
+            };
+            
+            DisplayTypingMessage($"⬇️ Descending from {currentDesc} to {newDesc}", ConsoleColor.Green);
+            if (playerAltitude == 0)
+                DisplayTypingMessage("⚠️ WARNING: At ground level - limited maneuverability!", ConsoleColor.Red);
         }
         else
         {
-            Console.WriteLine("Cannot change altitude further in that direction.");
-        }
-    }
-
-    public void SaveGame()
-    {
-        var saveData = new Dictionary<string, object>
-        {
-            { "playerX", playerX },
-            { "playerY", playerY },
-            { "playerHealth", playerHealth },
-            { "score", score },
-            { "playerAltitude", playerAltitude },
-            { "missileAmmo", missileAmmo },
-            { "gunAmmo", gunAmmo },
-            { "fuel", Fuel },
-            { "playerDamage", PlayerDamage },
-            { "currentWeather", (int)currentWeather }
-        };
-
-        string json = JsonSerializer.Serialize(saveData);
-        string savePath = "save.json";
-        File.WriteAllText(savePath, json);
-        Console.WriteLine($"Game saved to {savePath}");
-    }
-
-    public bool LoadGame()
-    {
-        string savePath = "save.json";
-        if (!File.Exists(savePath))
-        {
-            Console.WriteLine("No save file found!");
-            return false;
-        }
-
-        try
-        {
-            string json = File.ReadAllText(savePath);
-            var saveData = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
-
-            if (saveData != null)
-            {
-                playerX = saveData["playerX"].GetInt32();
-                playerY = saveData["playerY"].GetInt32();
-                playerHealth = saveData["playerHealth"].GetInt32();
-                score = saveData["score"].GetInt32();
-                playerAltitude = saveData["playerAltitude"].GetInt32();
-                missileAmmo = saveData["missileAmmo"].GetInt32();
-                gunAmmo = saveData["gunAmmo"].GetInt32();
-                Fuel = saveData["fuel"].GetInt32();
-                PlayerDamage = saveData["playerDamage"].GetInt32();
-                currentWeather = (Weather)saveData["currentWeather"].GetInt32();
-            }
+            if (increase)
+                DisplayTypingMessage("⚠️ Maximum service ceiling reached! Cannot climb higher.", ConsoleColor.Yellow);
             else
-            {
-                Console.WriteLine("Invalid save data!");
-                return false;
-            }
-
-            Console.WriteLine("Game loaded successfully!");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error loading game: {ex.Message}");
-            return false;
+                DisplayTypingMessage("⚠️ Already at minimum safe altitude!", ConsoleColor.Yellow);
         }
     }
 
@@ -1706,8 +1436,58 @@ class JetFighterGame
         Mission newMission = new Mission(missionName, rewardPoints);
         activeMissions.Add(newMission);
         
-        Console.WriteLine($"\nNew mission available: {missionName}");
-        Console.WriteLine($"Reward: {rewardPoints} points");
+        DisplayTypingMessage($"📡 NEW MISSION BRIEFING RECEIVED!", ConsoleColor.Cyan, 40);
+        DisplayTypingMessage($"🎯 {missionName}", ConsoleColor.White);
+        DisplayTypingMessage($"💰 Mission reward: {rewardPoints} points", ConsoleColor.Yellow);
+        DisplayTypingMessage("📋 Check mission status with 'm' command", ConsoleColor.Green);
+    }
+
+    public void DisplayMissions()
+    {
+        Console.Clear();
+        DisplayTypingMessage("📋 MISSION BRIEFING SYSTEM", ConsoleColor.Cyan, 40);
+        Console.WriteLine();
+        
+        Console.WriteLine("┌─ ACTIVE MISSIONS ──────────────────────────────────────────────────┐");
+        if (activeMissions.Count == 0)
+        {
+            Console.WriteLine("│ No active missions assigned.                                       │");
+        }
+        else
+        {
+            foreach (var mission in activeMissions)
+            {
+                Console.WriteLine($"│ 🎯 {mission.Objective,-50} Reward: {mission.RewardPoints,4} pts │");
+            }
+        }
+        Console.WriteLine("└─────────────────────────────────────────────────────────────────────┘");
+        Console.WriteLine();
+        
+        Console.WriteLine("┌─ COMPLETED MISSIONS ───────────────────────────────────────────────┐");
+        if (completedMissions.Count == 0)
+        {
+            Console.WriteLine("│ No completed missions.                                             │");
+        }
+        else
+        {
+            foreach (var mission in completedMissions)
+            {
+                Console.WriteLine($"│ ✅ {mission.Objective,-50} Reward: {mission.RewardPoints,4} pts │");
+            }
+        }
+        Console.WriteLine("└─────────────────────────────────────────────────────────────────────┘");
+        
+        WaitForInput();
+    }
+    
+    public void InitializeMissions()
+    {
+        // Start with 1-2 missions
+        int initialMissions = random.Next(1, 3);
+        for (int i = 0; i < initialMissions; i++)
+        {
+            GenerateNewMission();
+        }
     }
 
     public void CheckMissionProgress()
@@ -1778,81 +1558,460 @@ class JetFighterGame
     {
         activeMissions.Remove(mission);
         completedMissions.Add(mission);
-        mission.Complete();
+        
+        DisplayTypingMessage("🎯 MISSION ACCOMPLISHED!", ConsoleColor.Green, 50);
+        DisplayTypingMessage($"✅ {mission.Objective}", ConsoleColor.White);
+        DisplayTypingMessage($"💰 Mission reward: {mission.RewardPoints} points", ConsoleColor.Yellow);
+        
         score += mission.RewardPoints;
         
         // Maybe generate a new mission
         if (activeMissions.Count < 3 && random.NextDouble() < 0.7) // 70% chance
         {
+            System.Threading.Thread.Sleep(1000);
             GenerateNewMission();
         }
+        
+        WaitForInput();
     }
 
-    public void DisplayMissions()
+    private bool TryFireWeapon(string weaponType, EnemyJet enemy, int baseDamage)
     {
-        Console.WriteLine("\n--- ACTIVE MISSIONS ---");
-        if (activeMissions.Count == 0)
+        int ammo = weaponType == "Missile" ? missileAmmo : gunAmmo;
+        if (ammo <= 0)
         {
-            Console.WriteLine("No active missions.");
+            DisplayTypingMessage($"❌ OUT OF {weaponType.ToUpper()} AMMO! Weapon dry!", ConsoleColor.Red);
+            return false;
+        }
+        
+        // Calculate hit chance based on weather, altitude and distance
+        double hitChance = 0.65 * accuracyModifier;
+        double distance = Math.Sqrt(Math.Pow(enemy.X - playerX, 2) + Math.Pow(enemy.Y - playerY, 2));
+        
+        // Adjust hit chance based on distance
+        if (distance > 5) hitChance -= 0.15;
+        if (distance > 8) hitChance -= 0.15;
+        
+        // Stealth/advanced enemies are harder to hit
+        if (enemy is F22Raptor) hitChance -= 0.25;
+        else if (enemy.CombatExperience > 3) hitChance -= 0.1;
+        
+        // Display targeting information
+        DisplayTypingMessage($"🎯 Targeting {enemy.AircraftName}...", ConsoleColor.Cyan, 20);
+        DisplayTypingMessage($"Hit probability: {hitChance * 100:F0}%", ConsoleColor.Yellow);
+        
+        // Roll for hit
+        if (random.NextDouble() <= hitChance)
+        {
+            // Use playerDamage as a multiplier for weapon damage
+            int baseDmg = weaponType == "Missile" ? random.Next(4, 7) : random.Next(1, 3);
+            int damage = baseDmg * PlayerDamage;
+            enemy.Health -= damage;
+            
+            string hitMessage = weaponType == "Missile" ? 
+                $"💥 DIRECT HIT! Missile impact confirmed! {damage} damage dealt!" :
+                $"💥 TARGET HIT! Cannon rounds on target! {damage} damage dealt!";
+            
+            DisplayTypingMessage(hitMessage, ConsoleColor.Green, 30);
+            
+            if (damage > baseDmg * 1.5) // High damage
+                DisplayTypingMessage("🔥 CRITICAL DAMAGE! Excellent marksmanship!", ConsoleColor.Yellow);
+            
+            // Reduce ammo
+            if (weaponType == "Missile")
+                missileAmmo--;
+            else
+                gunAmmo -= 10;
+            
+            return true;
         }
         else
         {
-            foreach (var mission in activeMissions)
-            {
-                Console.WriteLine($"* {mission.Objective} (Reward: {mission.RewardPoints} points)");
-            }
+            string missMessage = weaponType == "Missile" ? 
+                "❌ MISSILE MISS! Target evaded - negative impact!" :
+                "❌ SHOTS WIDE! Cannon fire ineffective!";
+            
+            DisplayTypingMessage(missMessage, ConsoleColor.Red);
+            
+            // Weather/conditions affecting accuracy
+            if (currentWeather == Weather.Storm)
+                DisplayTypingMessage("⛈️ Storm conditions affecting targeting accuracy!", ConsoleColor.DarkYellow);
+            
+            if (weaponType == "Missile")
+                missileAmmo--;
+            else
+                gunAmmo -= 5;
+                
+            return false;
+        }
+    }
+
+    private void EnemyAttack(EnemyJet enemy)
+    {
+        // Base attack chance varies by aircraft type and experience
+        double attackChance = 0.7 + (enemy.CombatExperience * 0.05);
+        
+        // F-22 Raptor has higher accuracy
+        if (enemy is F22Raptor)
+        {
+            attackChance = 0.85;
+            DisplayTypingMessage("⚠️ F-22 Raptor locking weapons systems!", ConsoleColor.Red);
+        }
+        // Su-27 Flanker is also highly accurate
+        else if (enemy is Su27Flanker)
+        {
+            attackChance = 0.82;
+            DisplayTypingMessage("⚠️ Su-27 Flanker engaging with missiles!", ConsoleColor.Red);
+        }
+        // F-16 Falcon has good accuracy
+        else if (enemy is F16Falcon)
+        {
+            attackChance = 0.78;
+            DisplayTypingMessage("⚠️ F-16 Fighting Falcon opening fire!", ConsoleColor.Red);
         }
         
-        Console.WriteLine("\n--- COMPLETED MISSIONS ---");
-        if (completedMissions.Count == 0)
+        // Apply weather effects to attack chance
+        attackChance *= accuracyModifier;
+        
+        System.Threading.Thread.Sleep(800); // Build tension
+        
+        if (random.NextDouble() <= attackChance)
         {
-            Console.WriteLine("No completed missions.");
+            // Damage varies by aircraft type and experience
+            int baseDamage = enemy switch
+            {
+                F16Falcon => random.Next(2, 5),
+                Su27Flanker => random.Next(3, 6),
+                F22Raptor => random.Next(3, 7),
+                _ => random.Next(1, 4)
+            };
+            
+            // Critical hit chance based on experience
+            bool isCrit = random.NextDouble() < (0.15 + enemy.CombatExperience * 0.02);
+            int damage = isCrit ? baseDamage * 2 : baseDamage;
+            
+            if (isCrit)
+            {
+                DisplayTypingMessage($"💥💥 CRITICAL HIT! {enemy.AircraftName} scores devastating hit for {damage} damage!", ConsoleColor.Red, 40);
+                DisplayTypingMessage("🚨 HULL BREACH! Critical systems damaged!", ConsoleColor.Red);
+            }
+            else
+            {
+                DisplayTypingMessage($"💥 ENEMY HIT! {enemy.AircraftName} deals {damage} damage!", ConsoleColor.Red, 30);
+            }
+            
+            playerHealth -= damage;
+            
+            // Health status warnings
+            if (playerHealth <= 1)
+                DisplayTypingMessage("🆘 CRITICAL CONDITION! Immediate medical attention required!", ConsoleColor.Red, 50);
+            else if (playerHealth <= 2)
+                DisplayTypingMessage("⚠️ SEVERE DAMAGE! Hull integrity compromised!", ConsoleColor.Yellow);
+            else if (playerHealth <= 3)
+                DisplayTypingMessage("⚠️ MODERATE DAMAGE! Systems showing stress!", ConsoleColor.Yellow);
+            
+            if (playerHealth <= 0)
+            {
+                currentState = GameState.Defeat;
+                DisplayTypingMessage("💀 AIRCRAFT DESTROYED! PILOT DOWN!", ConsoleColor.Red, 50);
+            }
         }
         else
         {
-            foreach (var mission in completedMissions)
+            string[] missMessages = {
+                $"✅ {enemy.AircraftName} misses! Shots wide of target!",
+                $"✅ Evasive maneuvers successful! {enemy.AircraftName} attack ineffective!",
+                $"✅ Lucky break! {enemy.AircraftName} weapons malfunction!",
+                $"✅ Defensive systems work! {enemy.AircraftName} can't get a lock!"
+            };
+            DisplayTypingMessage(missMessages[random.Next(missMessages.Length)], ConsoleColor.Green);
+        }
+    }
+
+    private void PerformEvasiveManeuver()
+    {
+        DisplayTypingMessage("🌪️ Executing barrel roll maneuver!", ConsoleColor.Green, 40);
+        
+        // Chance to avoid enemy attacks in the next turn
+        ConsumeFuel("turn");
+        
+        // Move to a random adjacent cell if possible
+        int[] dx = { -1, -1, -1, 0, 0, 1, 1, 1 };
+        int[] dy = { -1, 0, 1, -1, 1, -1, 0, 1 };
+        
+        List<(int, int)> validMoves = new List<(int, int)>();
+        for (int i = 0; i < dx.Length; i++)
+        {
+            int newX = playerX + dx[i];
+            int newY = playerY + dy[i];
+            if (newX >= 0 && newX < gridSize && newY >= 0 && newY < gridSize)
             {
-                Console.WriteLine($"* {mission.Objective} (Reward: {mission.RewardPoints} points)");
+                validMoves.Add((newX, newY));
             }
         }
         
-        Console.WriteLine("\nPress any key to continue...");
-        Console.ReadKey();
-    }
-    
-    public void InitializeMissions()
-    {
-        // Start with 1-2 missions
-        int initialMissions = random.Next(1, 3);
-        for (int i = 0; i < initialMissions; i++)
+        if (validMoves.Count > 0)
         {
-            GenerateNewMission();
+            var move = validMoves[random.Next(validMoves.Count)];
+            playerX = move.Item1;
+            playerY = move.Item2;
+            DisplayTypingMessage("✅ Evasive maneuver successful! New position acquired.", ConsoleColor.Green);
+        }
+        else
+        {
+            DisplayTypingMessage("⚠️ Limited maneuvering space! Maintaining current position.", ConsoleColor.Yellow);
         }
     }
-}
 
-class Weapon
-{
-    public string Name { get; }
-    public int Range { get; }
-    public int Damage { get; }
-    public int Ammo { get; set; }
-    
-    public Weapon(string name, int range, int damage, int ammo)
+    public void PowerUp()
     {
-        Name = name;
-        Range = range;
-        Damage = damage;
-        Ammo = ammo;
+        PlayerDamage++;
+        DisplayTypingMessage("🚀 POWER UP ACQUIRED!", ConsoleColor.Yellow, 50);
+        DisplayTypingMessage($"⚡ Weapons systems upgraded! Damage multiplier: x{PlayerDamage}", ConsoleColor.Green, 30);
+        DisplayTypingMessage("🔧 All weapon systems now operating at enhanced capacity!", ConsoleColor.Cyan);
     }
-    
-    public bool Fire(out int damageDealt)
+
+    private void ConsumeFuel(string maneuver)
     {
-        damageDealt = 0;
-        if (Ammo <= 0) return false;
+        // Base consumption rate
+        int consumption = 1;
         
-        Ammo--;
-        damageDealt = Damage;
+        // Add consumption based on maneuver
+        consumption += maneuver switch {
+            "afterburner" => 4,
+            "climb" => 2,
+            "turn" => 1,
+            _ => 0
+        };
+        
+        // Add consumption based on speed
+        if (Velocity > MaxVelocity * 0.8) consumption += 1;
+        
+        // Add consumption based on altitude - higher is more efficient for cruising
+        if (playerAltitude == 0) consumption += 1; // Low altitude is inefficient
+        else if (playerAltitude == 3) consumption = Math.Max(1, consumption - 1); // High altitude is efficient for cruising, but always consume at least 1 fuel
+        
+        // If afterburner is on, double the consumption but also increase speed
+        if (afterburnerEnabled)
+        {
+            consumption *= 2;
+        }
+        
+        Fuel -= consumption;
+        if (Fuel <= 0)
+        {
+            Fuel = 0;
+            HandlePlayerOutOfFuel();
+        }
+    }
+
+    private void HandlePlayerOutOfFuel()
+    {
+        DisplayTypingMessage("🚨 WARNING: OUT OF FUEL! EMERGENCY LANDING REQUIRED!", ConsoleColor.Red, 50);
+        
+        // Forced descent
+        if (playerAltitude > 0)
+        {
+            playerAltitude--;
+            DisplayTypingMessage($"⬇️ Altitude dropping! Current altitude: {playerAltitude}", ConsoleColor.Yellow);
+        }
+        else
+        {
+            // Check if player is over a landing zone/base
+            if (IsOverLandingZone(playerX, playerY))
+            {
+                DisplayTypingMessage("✅ Emergency landing successful!", ConsoleColor.Green);
+                Refuel(50); // Partial refuel after emergency landing
+            }
+            else
+            {
+                // Crashed
+                playerHealth -= 2;
+                DisplayTypingMessage("💥 CRASH! Emergency landing on hostile terrain!", ConsoleColor.Red);
+                
+                if (playerHealth <= 0)
+                {
+                    currentState = GameState.Defeat;
+                    HandleGameOver();
+                }
+            }
+        }
+        
+        WaitForInput();
+    }
+
+    private bool IsOverLandingZone(int x, int y)
+    {
+        return grid[x, y] == 'B';
+    }
+
+    private void Refuel(int amount)
+    {
+        Fuel += amount;
+        if (Fuel > MaxFuel)
+            Fuel = MaxFuel;
+        DisplayTypingMessage($"⛽ Refueled! Current fuel: {Fuel}/{MaxFuel}", ConsoleColor.Green);
+    }
+
+    public void ProcessPlayerAction(string action)
+    {
+        switch (action.ToLower())
+        {
+            case "r": // Refuel if over base or near tanker
+                TryRefuel();
+                break;
+            case "b": // Afterburner
+                ToggleAfterburner();
+                break;
+            case "v": // Save game
+                SaveGame();
+                break;
+            case "l": // Load game
+                LoadGame();
+                break;
+            case "m": // Show missions
+                DisplayMissions();
+                break;
+        }
+    }
+
+    private void TryRefuel()
+    {
+        // Check if player is on an airbase
+        if (basePositions.Contains((playerX, playerY)))
+        {
+            DisplayTypingMessage("🏭 Airbase refueling sequence initiated...", ConsoleColor.Cyan);
+            System.Threading.Thread.Sleep(1000);
+            DisplayTypingMessage("⛽ Fuel pumps engaged - full tank refuel in progress...", ConsoleColor.Yellow);
+            Refuel(MaxFuel); // Full refuel
+            DisplayTypingMessage("✅ Refueling complete! All systems ready for combat.", ConsoleColor.Green);
+            return;
+        }
+        
+        // Check if player is adjacent to a tanker
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                int nx = playerX + dx;
+                int ny = playerY + dy;
+                
+                if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize && grid[nx, ny] == 'T')
+                {
+                    DisplayTypingMessage("✈️ Mid-air refueling tanker detected!", ConsoleColor.Cyan);
+                    DisplayTypingMessage("🔗 Establishing fuel line connection...", ConsoleColor.Yellow);
+                    System.Threading.Thread.Sleep(1500);
+                    DisplayTypingMessage("⛽ Mid-air refueling in progress...", ConsoleColor.Yellow);
+                    Refuel(MaxFuel / 2); // Half tank from mid-air refueling
+                    DisplayTypingMessage("✅ Mid-air refueling complete! Disconnecting fuel line.", ConsoleColor.Green);
+                    return;
+                }
+            }
+        }
+        
+        DisplayTypingMessage("❌ No refueling sources detected in area!", ConsoleColor.Red);
+        DisplayTypingMessage("🔍 Search for airbase (B) or tanker aircraft (T) nearby.", ConsoleColor.Yellow);
+    }
+
+    private void ToggleAfterburner()
+    {
+        afterburnerEnabled = !afterburnerEnabled;
+        if (afterburnerEnabled)
+        {
+            DisplayTypingMessage("🔥 AFTERBURNER ENGAGED! Maximum thrust activated!", ConsoleColor.Red, 40);
+            DisplayTypingMessage("⚠️ WARNING: Increased fuel consumption rate!", ConsoleColor.Yellow);
+        }
+        else
+        {
+            DisplayTypingMessage("🔥 Afterburner disengaged. Normal cruise thrust restored.", ConsoleColor.Green);
+            DisplayTypingMessage("✅ Fuel consumption returned to normal levels.", ConsoleColor.White);
+        }
+    }
+
+    public void SaveGame()
+    {
+        try
+        {
+            DisplayTypingMessage("💾 Initiating save sequence...", ConsoleColor.Cyan);
+            
+            var saveData = new Dictionary<string, object>
+            {
+                { "playerX", playerX },
+                { "playerY", playerY },
+                { "playerHealth", playerHealth },
+                { "score", score },
+                { "playerAltitude", playerAltitude },
+                { "missileAmmo", missileAmmo },
+                { "gunAmmo", gunAmmo },
+                { "fuel", Fuel },
+                { "playerDamage", PlayerDamage },
+                { "currentWeather", (int)currentWeather }
+            };
+
+            string json = JsonSerializer.Serialize(saveData);
+            string savePath = "save.json";
+            File.WriteAllText(savePath, json);
+            
+            DisplayTypingMessage("✅ Game saved successfully to flight recorder!", ConsoleColor.Green);
+            DisplayTypingMessage($"📁 Save file: {savePath}", ConsoleColor.White);
+        }
+        catch (Exception ex)
+        {
+            DisplayTypingMessage($"❌ Save failed! Error: {ex.Message}", ConsoleColor.Red);
+        }
+        
+        WaitForInput();
+    }
+
+    public bool LoadGame()
+    {
+        string savePath = "save.json";
+        if (!File.Exists(savePath))
+        {
+            DisplayTypingMessage("❌ No saved mission found in flight recorder!", ConsoleColor.Red);
+            WaitForInput();
+            return false;
+        }
+
+        try
+        {
+            DisplayTypingMessage("📁 Loading saved mission from flight recorder...", ConsoleColor.Cyan);
+            
+            string json = File.ReadAllText(savePath);
+            var saveData = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+
+            if (saveData != null)
+            {
+                playerX = saveData["playerX"].GetInt32();
+                playerY = saveData["playerY"].GetInt32();
+                playerHealth = saveData["playerHealth"].GetInt32();
+                score = saveData["score"].GetInt32();
+                playerAltitude = saveData["playerAltitude"].GetInt32();
+                missileAmmo = saveData["missileAmmo"].GetInt32();
+                gunAmmo = saveData["gunAmmo"].GetInt32();
+                Fuel = saveData["fuel"].GetInt32();
+                PlayerDamage = saveData["playerDamage"].GetInt32();
+                currentWeather = (Weather)saveData["currentWeather"].GetInt32();
+                
+                DisplayTypingMessage("✅ Mission data loaded successfully!", ConsoleColor.Green);
+                DisplayTypingMessage($"📊 Health: {playerHealth} | Score: {score} | Fuel: {Fuel}", ConsoleColor.White);
+                DisplayTypingMessage("🎯 Resuming combat operations...", ConsoleColor.Yellow);
+            }
+            else
+            {
+                DisplayTypingMessage("❌ Corrupted save data! Unable to load mission.", ConsoleColor.Red);
+                WaitForInput();
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            DisplayTypingMessage($"❌ Load failed! Error: {ex.Message}", ConsoleColor.Red);
+            WaitForInput();
+            return false;
+        }
+        
+        WaitForInput();
         return true;
     }
 }
@@ -1871,7 +2030,9 @@ class Program
             Console.Write("\nEnter move or action: ");
             string? input = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(input))
-                continue;            // Process action commands
+                continue;
+                
+            // Process action commands
             if (input == "r" || input == "b" || input == "v" || input == "l" || input == "m")
             {
                 game.ProcessPlayerAction(input);
