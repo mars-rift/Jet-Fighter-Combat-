@@ -4,8 +4,9 @@ using System.Linq;
 using System.IO;
 using System.Text.Json;
 
-enum EnemyState { Patrolling, Chasing, Retreating }
+enum EnemyState { Patrolling, Chasing, Retreating, Flanking, Diving, Climbing }
 enum Weather { Clear, Cloudy, Storm }
+enum AircraftType { F16_Falcon, F35_Lightning, Su27_Flanker, MiG29_Fulcrum, F22_Raptor }
 
 class Mission
 {
@@ -34,15 +35,24 @@ abstract class EnemyJet
     public int Y { get; set; }
     public char Symbol { get; protected set; }
     public int Health { get; set; }
+    public int MaxHealth { get; protected set; }
     public abstract int ScoreValue { get; }
     public double Heading { get; set; } // Direction in degrees (0-359)
     public double Velocity { get; set; } // Current speed
     public double MaxVelocity { get; protected set; }
     public double TurnRate { get; protected set; } // How fast the jet can turn
     public int Altitude { get; set; } // 0-3 altitude levels
+    public int PreferredAltitude { get; protected set; } // AI preferred altitude
     public int Fuel { get; set; }
     public int MaxFuel { get; protected set; }
     public bool IsDetected { get; set; }
+    public AircraftType AircraftType { get; protected set; }
+    public string AircraftName { get; protected set; }
+    public EnemyState CurrentState { get; protected set; }
+    public int TurnsInState { get; protected set; }
+    public int CombatExperience { get; protected set; } // Affects accuracy and tactics
+    public bool HasAdvancedRadar { get; protected set; }
+    public int DetectionRange { get; protected set; }
 
     public EnemyJet(int x, int y)
     {
@@ -50,16 +60,73 @@ abstract class EnemyJet
         Y = y;
         Symbol = 'E';
         Health = 1;
-        Fuel = 100;     // Initialize with fuel
+        MaxHealth = 1;
+        Fuel = 100;
         MaxFuel = 100;
-        Altitude = 1;   // Set starting altitude
+        Altitude = 1;
+        PreferredAltitude = 1;
         Heading = 0;
         Velocity = 1;
         MaxVelocity = 2;
-        TurnRate = 45;  // 45 degrees per turn
+        TurnRate = 45;
+        CurrentState = EnemyState.Patrolling;
+        TurnsInState = 0;
+        CombatExperience = 1;
+        HasAdvancedRadar = false;
+        DetectionRange = 5;
+        AircraftName = "Unknown";
     }
 
     public abstract void Move(int playerX, int playerY, char[,] grid);
+
+    protected void UpdateState(EnemyState newState)
+    {
+        if (CurrentState != newState)
+        {
+            CurrentState = newState;
+            TurnsInState = 0;
+        }
+        else
+        {
+            TurnsInState++;
+        }
+    }
+
+    protected void ManageAltitude(int playerAltitude)
+    {
+        // AI altitude management based on combat situation and aircraft type
+        if (CurrentState == EnemyState.Chasing)
+        {
+            // Try to match or gain altitude advantage over player
+            if (playerAltitude > Altitude && Altitude < 3)
+            {
+                Altitude++;
+                ConsumeFuel("climb");
+            }
+        }
+        else if (CurrentState == EnemyState.Retreating)
+        {
+            // Climb to escape if possible
+            if (Altitude < 3)
+            {
+                Altitude++;
+                ConsumeFuel("climb");
+            }
+        }
+        else if (CurrentState == EnemyState.Patrolling)
+        {
+            // Return to preferred altitude
+            if (Altitude < PreferredAltitude && Altitude < 3)
+            {
+                Altitude++;
+                ConsumeFuel("climb");
+            }
+            else if (Altitude > PreferredAltitude && Altitude > 0)
+            {
+                Altitude--;
+            }
+        }
+    }
 
     protected void ConsumeFuel(string maneuver)
     {
@@ -74,51 +141,205 @@ abstract class EnemyJet
         if (Fuel <= 0)
         {
             Fuel = 0;
-            // Handle out of fuel emergency
             HandleOutOfFuel();
         }
     }
 
     protected void HandleOutOfFuel()
     {
-        // For enemy jets
-        Health -= 1; // Damage from engine failure
+        Health -= 1;
         
-        // Emergency descent - lose altitude each turn
         if (Altitude > 0)
         {
             Altitude--;
         }
         else
         {
-            // Crashed
             Health = 0;
         }
     }
+
+    public virtual bool CanDetectPlayer(int playerX, int playerY, int playerAltitude)
+    {
+        double distance = Math.Sqrt(Math.Pow(X - playerX, 2) + Math.Pow(Y - playerY, 2));
+        int altitudeDifference = Math.Abs(Altitude - playerAltitude);
+        
+        // Advanced radar can detect at longer range
+        int effectiveRange = HasAdvancedRadar ? DetectionRange + 3 : DetectionRange;
+        
+        // Altitude difference affects detection
+        if (altitudeDifference > 1) effectiveRange -= 2;
+        
+        return distance <= effectiveRange;
+    }
 }
 
-class BasicEnemyJet : EnemyJet
+class F16Falcon : EnemyJet
 {
     private readonly JetFighterGame game;
+    private Random random = new Random();
+    private int lastPlayerX = -1, lastPlayerY = -1;
+    private int turnsWithoutContact = 0;
 
-    public BasicEnemyJet(int x, int y, JetFighterGame game) : base(x, y)
+    public F16Falcon(int x, int y, JetFighterGame game) : base(x, y)
     {
         this.game = game;
-        Health = 2;     // Increase from 1 to 2
-        Symbol = 'E';  // Changed from 'B' to 'E' for Enemy
+        AircraftType = AircraftType.F16_Falcon;
+        AircraftName = "F-16 Fighting Falcon";
+        Health = 3;
+        MaxHealth = 3;
+        Symbol = 'F';
+        MaxVelocity = 2.5;
+        TurnRate = 50;
+        PreferredAltitude = 2; // Medium altitude fighter
+        CombatExperience = 3;
+        HasAdvancedRadar = true;
+        DetectionRange = 7;
     }
 
-    public override int ScoreValue => 100;
+    public override int ScoreValue => 150;
 
     public override void Move(int playerX, int playerY, char[,] grid)
     {
+        bool playerDetected = CanDetectPlayer(playerX, playerY, game.PlayerAltitude);
+        
+        if (playerDetected)
+        {
+            lastPlayerX = playerX;
+            lastPlayerY = playerY;
+            turnsWithoutContact = 0;
+            
+            double distance = Math.Sqrt(Math.Pow(X - playerX, 2) + Math.Pow(Y - playerY, 2));
+            
+            if (Health < MaxHealth * 0.3)
+            {
+                UpdateState(EnemyState.Retreating);
+            }
+            else if (distance <= 3)
+            {
+                UpdateState(EnemyState.Flanking);
+            }
+            else
+            {
+                UpdateState(EnemyState.Chasing);
+            }
+        }
+        else
+        {
+            turnsWithoutContact++;
+            if (turnsWithoutContact > 5)
+            {
+                UpdateState(EnemyState.Patrolling);
+            }
+        }
+
+        ManageAltitude(game.PlayerAltitude);
+        ExecuteManeuver(playerX, playerY, grid);
+        ConsumeFuel("regular");
+    }
+
+    private void ExecuteManeuver(int playerX, int playerY, char[,] grid)
+    {
+        switch (CurrentState)
+        {
+            case EnemyState.Patrolling:
+                AdvancedPatrol(grid);
+                break;
+            case EnemyState.Chasing:
+                PursuitManeuver(playerX, playerY, grid);
+                break;
+            case EnemyState.Retreating:
+                TacticalRetreat(playerX, playerY, grid);
+                break;
+            case EnemyState.Flanking:
+                FlankingManeuver(playerX, playerY, grid);
+                break;
+        }
+    }
+
+    private void AdvancedPatrol(char[,] grid)
+    {
+        if (lastPlayerX != -1 && lastPlayerY != -1)
+        {
+            // Search near last known position
+            var step = game.AStarStep(X, Y, lastPlayerX, lastPlayerY, grid);
+            if (step != null && random.NextDouble() < 0.7)
+            {
+                X = step.Value.nextX;
+                Y = step.Value.nextY;
+                return;
+            }
+        }
+        
+        // Random patrol with some intelligence
+        RandomMove(grid);
+    }
+
+    private void PursuitManeuver(int playerX, int playerY, char[,] grid)
+    {
+        // Use afterburner occasionally for pursuit
+        if (random.NextDouble() < 0.3)
+        {
+            ConsumeFuel("afterburner");
+        }
+        
         var step = game.AStarStep(X, Y, playerX, playerY, grid);
         if (step != null)
         {
             X = step.Value.nextX;
             Y = step.Value.nextY;
         }
-        ConsumeFuel("regular");
+    }
+
+    private void TacticalRetreat(int playerX, int playerY, char[,] grid)
+    {
+        // Move away from player while trying to gain altitude advantage
+        int dx = X - playerX;
+        int dy = Y - playerY;
+        if (dx != 0) dx = dx > 0 ? 1 : -1;
+        if (dy != 0) dy = dy > 0 ? 1 : -1;
+        
+        int newX = Math.Max(0, Math.Min(grid.GetLength(0) - 1, X + dx));
+        int newY = Math.Max(0, Math.Min(grid.GetLength(1) - 1, Y + dy));
+        
+        X = newX;
+        Y = newY;
+    }
+
+    private void FlankingManeuver(int playerX, int playerY, char[,] grid)
+    {
+        // Try to move to player's flank
+        int[] flankX = { playerX - 2, playerX + 2, playerX - 1, playerX + 1 };
+        int[] flankY = { playerY - 1, playerY + 1, playerY - 2, playerY + 2 };
+        
+        for (int i = 0; i < flankX.Length; i++)
+        {
+            if (flankX[i] >= 0 && flankX[i] < grid.GetLength(0) &&
+                flankY[i] >= 0 && flankY[i] < grid.GetLength(1))
+            {
+                var step = game.AStarStep(X, Y, flankX[i], flankY[i], grid);
+                if (step != null)
+                {
+                    X = step.Value.nextX;
+                    Y = step.Value.nextY;
+                    return;
+                }
+            }
+        }
+        
+        // Fallback to pursuit
+        PursuitManeuver(playerX, playerY, grid);
+    }
+
+    private void RandomMove(char[,] grid)
+    {
+        int direction = random.Next(0, 8);
+        int[] dx = { -1, 0, 1, -1, 1, -1, 0, 1 };
+        int[] dy = { -1, -1, -1, 0, 0, 1, 1, 1 };
+        int newX = Math.Max(0, Math.Min(grid.GetLength(0) - 1, X + dx[direction]));
+        int newY = Math.Max(0, Math.Min(grid.GetLength(1) - 1, Y + dy[direction]));
+        X = newX;
+        Y = newY;
     }
 }
 
@@ -200,31 +421,380 @@ class AdvancedEnemyJet : EnemyJet
     }
 }
 
-class StealthEnemyJet : EnemyJet
+class Su27Flanker : EnemyJet
 {
     private readonly JetFighterGame game;
+    private Random random = new Random();
+    private int aggressionLevel = 5; // 1-10 scale
 
-    public StealthEnemyJet(int x, int y, JetFighterGame game) : base(x, y)
+    public Su27Flanker(int x, int y, JetFighterGame game) : base(x, y)
     {
         this.game = game;
+        AircraftType = AircraftType.Su27_Flanker;
+        AircraftName = "Su-27 Flanker";
+        Health = 5;
+        MaxHealth = 5;
         Symbol = 'S';
-        Health = 3;      // Increase from 1 to 3
-        MaxVelocity = 2.5;
-        TurnRate = 50;
+        MaxVelocity = 3.5;
+        TurnRate = 55;
+        PreferredAltitude = 3; // High altitude interceptor
+        CombatExperience = 4;
+        HasAdvancedRadar = true;
+        DetectionRange = 9;
     }
 
-    public override int ScoreValue => 200;
+    public override int ScoreValue => 250;
 
     public override void Move(int playerX, int playerY, char[,] grid)
     {
+        bool playerDetected = CanDetectPlayer(playerX, playerY, game.PlayerAltitude);
+        
+        if (playerDetected)
+        {
+            double distance = Math.Sqrt(Math.Pow(X - playerX, 2) + Math.Pow(Y - playerY, 2));
+            
+            if (Health < MaxHealth * 0.4)
+            {
+                UpdateState(EnemyState.Retreating);
+                aggressionLevel = Math.Max(1, aggressionLevel - 1);
+            }
+            else if (distance > 8)
+            {
+                UpdateState(EnemyState.Chasing);
+            }
+            else if (aggressionLevel > 6)
+            {
+                UpdateState(EnemyState.Diving); // Aggressive diving attack
+            }
+            else
+            {
+                UpdateState(EnemyState.Flanking);
+            }
+        }
+        else
+        {
+            UpdateState(EnemyState.Patrolling);
+        }
+
+        ManageAltitude(game.PlayerAltitude);
+        ExecuteAdvancedManeuver(playerX, playerY, grid);
+        ConsumeFuel("regular");
+    }
+
+    private void ExecuteAdvancedManeuver(int playerX, int playerY, char[,] grid)
+    {
+        switch (CurrentState)
+        {
+            case EnemyState.Patrolling:
+                HighAltitudePatrol(grid);
+                break;
+            case EnemyState.Chasing:
+                InterceptorPursuit(playerX, playerY, grid);
+                break;
+            case EnemyState.Retreating:
+                EvasiveRetreat(playerX, playerY, grid);
+                break;
+            case EnemyState.Diving:
+                DivingAttack(playerX, playerY, grid);
+                break;
+            case EnemyState.Flanking:
+                FlankingManeuver(playerX, playerY, grid);
+                break;
+        }
+    }
+
+    private void HighAltitudePatrol(char[,] grid)
+    {
+        // Maintain high altitude and wide patrol pattern
+        if (random.NextDouble() < 0.6)
+        {
+            RandomMove(grid);
+        }
+    }
+
+    private void InterceptorPursuit(int playerX, int playerY, char[,] grid)
+    {
+        // Use afterburner for high-speed pursuit
+        if (random.NextDouble() < 0.4)
+        {
+            ConsumeFuel("afterburner");
+        }
+        
         var step = game.AStarStep(X, Y, playerX, playerY, grid);
         if (step != null)
         {
             X = step.Value.nextX;
             Y = step.Value.nextY;
         }
+    }
+
+    private void EvasiveRetreat(int playerX, int playerY, char[,] grid)
+    {
+        // Complex evasive maneuvers while retreating
+        int dx = X - playerX;
+        int dy = Y - playerY;
+        
+        // Add some randomness to make retreat less predictable
+        dx += random.Next(-1, 2);
+        dy += random.Next(-1, 2);
+        
+        if (dx != 0) dx = dx > 0 ? 1 : -1;
+        if (dy != 0) dy = dy > 0 ? 1 : -1;
+        
+        int newX = Math.Max(0, Math.Min(grid.GetLength(0) - 1, X + dx));
+        int newY = Math.Max(0, Math.Min(grid.GetLength(1) - 1, Y + dy));
+        
+        X = newX;
+        Y = newY;
+    }
+
+    private void DivingAttack(int playerX, int playerY, char[,] grid)
+    {
+        // Aggressive diving attack - move directly toward player
+        var step = game.AStarStep(X, Y, playerX, playerY, grid);
+        if (step != null)
+        {
+            X = step.Value.nextX;
+            Y = step.Value.nextY;
+        }
+        
+        // Lose altitude during dive
+        if (Altitude > 0 && random.NextDouble() < 0.3)
+        {
+            Altitude--;
+        }
+    }
+
+    private void FlankingManeuver(int playerX, int playerY, char[,] grid)
+    {
+        // Similar to F16 flanking but more aggressive
+        int[] flankX = { playerX - 3, playerX + 3, playerX - 2, playerX + 2 };
+        int[] flankY = { playerY - 2, playerY + 2, playerY - 3, playerY + 3 };
+        
+        for (int i = 0; i < flankX.Length; i++)
+        {
+            if (flankX[i] >= 0 && flankX[i] < grid.GetLength(0) &&
+                flankY[i] >= 0 && flankY[i] < grid.GetLength(1))
+            {
+                var step = game.AStarStep(X, Y, flankX[i], flankY[i], grid);
+                if (step != null)
+                {
+                    X = step.Value.nextX;
+                    Y = step.Value.nextY;
+                    return;
+                }
+            }
+        }
+        
+        InterceptorPursuit(playerX, playerY, grid);
+    }
+
+    private void RandomMove(char[,] grid)
+    {
+        int direction = random.Next(0, 8);
+        int[] dx = { -1, 0, 1, -1, 1, -1, 0, 1 };
+        int[] dy = { -1, -1, -1, 0, 0, 1, 1, 1 };
+        int newX = Math.Max(0, Math.Min(grid.GetLength(0) - 1, X + dx[direction]));
+        int newY = Math.Max(0, Math.Min(grid.GetLength(1) - 1, Y + dy[direction]));
+        X = newX;
+        Y = newY;
+    }
+}
+
+class F22Raptor : EnemyJet
+{
+    private readonly JetFighterGame game;
+    private Random random = new Random();
+    private bool stealthMode = true;
+    private int stealthCooldown = 0;
+
+    public F22Raptor(int x, int y, JetFighterGame game) : base(x, y)
+    {
+        this.game = game;
+        AircraftType = AircraftType.F22_Raptor;
+        AircraftName = "F-22 Raptor";
+        Health = 4;
+        MaxHealth = 4;
+        Symbol = 'R';
+        MaxVelocity = 3.2;
+        TurnRate = 65;
+        PreferredAltitude = 3; // High altitude stealth fighter
+        CombatExperience = 5;
+        HasAdvancedRadar = true;
+        DetectionRange = 8;
+    }
+
+    public override int ScoreValue => 300;
+
+    public override void Move(int playerX, int playerY, char[,] grid)
+    {
+        ManageStealthMode();
+        
+        bool playerDetected = CanDetectPlayer(playerX, playerY, game.PlayerAltitude);
+        
+        if (playerDetected)
+        {
+            double distance = Math.Sqrt(Math.Pow(X - playerX, 2) + Math.Pow(Y - playerY, 2));
+            
+            if (Health < MaxHealth * 0.5)
+            {
+                UpdateState(EnemyState.Retreating);
+                stealthMode = true; // Activate stealth when retreating
+            }
+            else if (distance <= 4 && stealthMode)
+            {
+                UpdateState(EnemyState.Diving); // Stealth attack
+            }
+            else
+            {
+                UpdateState(EnemyState.Chasing);
+            }
+        }
+        else
+        {
+            UpdateState(EnemyState.Patrolling);
+        }
+
+        ManageAltitude(game.PlayerAltitude);
+        ExecuteStealthManeuver(playerX, playerY, grid);
         ConsumeFuel("regular");
     }
+
+    private void ManageStealthMode()
+    {
+        if (stealthCooldown > 0)
+        {
+            stealthCooldown--;
+            return;
+        }
+
+        // Toggle stealth based on situation
+        if (CurrentState == EnemyState.Retreating || 
+            (CurrentState == EnemyState.Patrolling && random.NextDouble() < 0.3))
+        {
+            stealthMode = true;
+        }
+        else if (CurrentState == EnemyState.Chasing && random.NextDouble() < 0.2)
+        {
+            stealthMode = false; // Sometimes turn off stealth for attack
+            stealthCooldown = 3; // Cooldown before next stealth activation
+        }
+    }
+
+    public override bool CanDetectPlayer(int playerX, int playerY, int playerAltitude)
+    {
+        // F-22 has reduced detection range when in stealth mode
+        double distance = Math.Sqrt(Math.Pow(X - playerX, 2) + Math.Pow(Y - playerY, 2));
+        int altitudeDifference = Math.Abs(Altitude - playerAltitude);
+        
+        int effectiveRange = stealthMode ? DetectionRange - 2 : DetectionRange + 3;
+        
+        if (altitudeDifference > 1) effectiveRange -= 2;
+        
+        return distance <= effectiveRange;
+    }
+
+    private void ExecuteStealthManeuver(int playerX, int playerY, char[,] grid)
+    {
+        switch (CurrentState)
+        {
+            case EnemyState.Patrolling:
+                StealthPatrol(grid);
+                break;
+            case EnemyState.Chasing:
+                StealthPursuit(playerX, playerY, grid);
+                break;
+            case EnemyState.Retreating:
+                StealthRetreat(playerX, playerY, grid);
+                break;
+            case EnemyState.Diving:
+                StealthAttack(playerX, playerY, grid);
+                break;
+        }
+    }
+
+    private void StealthPatrol(char[,] grid)
+    {
+        // Unpredictable movement pattern
+        if (random.NextDouble() < 0.4)
+        {
+            RandomMove(grid);
+        }
+    }
+
+    private void StealthPursuit(int playerX, int playerY, char[,] grid)
+    {
+        // Approach from unexpected angles
+        if (random.NextDouble() < 0.3)
+        {
+            // Indirect approach
+            int offsetX = random.Next(-2, 3);
+            int offsetY = random.Next(-2, 3);
+            int targetX = Math.Max(0, Math.Min(grid.GetLength(0) - 1, playerX + offsetX));
+            int targetY = Math.Max(0, Math.Min(grid.GetLength(1) - 1, playerY + offsetY));
+            
+            var step = game.AStarStep(X, Y, targetX, targetY, grid);
+            if (step != null)
+            {
+                X = step.Value.nextX;
+                Y = step.Value.nextY;
+            }
+        }
+        else
+        {
+            // Direct approach
+            var step = game.AStarStep(X, Y, playerX, playerY, grid);
+            if (step != null)
+            {
+                X = step.Value.nextX;
+                Y = step.Value.nextY;
+            }
+        }
+    }
+
+    private void StealthRetreat(int playerX, int playerY, char[,] grid)
+    {
+        // Evasive retreat with stealth
+        int dx = X - playerX;
+        int dy = Y - playerY;
+        
+        // Add stealth evasion
+        dx += random.Next(-2, 3);
+        dy += random.Next(-2, 3);
+        
+        if (dx != 0) dx = dx > 0 ? 1 : -1;
+        if (dy != 0) dy = dy > 0 ? 1 : -1;
+        
+        int newX = Math.Max(0, Math.Min(grid.GetLength(0) - 1, X + dx));
+        int newY = Math.Max(0, Math.Min(grid.GetLength(1) - 1, Y + dy));
+        
+        X = newX;
+        Y = newY;
+    }
+
+    private void StealthAttack(int playerX, int playerY, char[,] grid)
+    {
+        // Sudden stealth attack - direct approach
+        var step = game.AStarStep(X, Y, playerX, playerY, grid);
+        if (step != null)
+        {
+            X = step.Value.nextX;
+            Y = step.Value.nextY;
+        }
+    }
+
+    private void RandomMove(char[,] grid)
+    {
+        int direction = random.Next(0, 8);
+        int[] dx = { -1, 0, 1, -1, 1, -1, 0, 1 };
+        int[] dy = { -1, -1, -1, 0, 0, 1, 1, 1 };
+        int newX = Math.Max(0, Math.Min(grid.GetLength(0) - 1, X + dx[direction]));
+        int newY = Math.Max(0, Math.Min(grid.GetLength(1) - 1, Y + dy[direction]));
+        X = newX;
+        Y = newY;
+    }
+
+    public bool IsInStealthMode() => stealthMode;
 }
 
 public class Node
@@ -254,7 +824,7 @@ class JetFighterGame
     private const int gridSize = 20;
     private char[,] grid;
     private int playerX, playerY;
-    private char playerJet = 'F';
+    private char playerJet = 'P';
     private int playerHealth = 5;
     private int score = 0;
     private List<Mission> activeMissions = new List<Mission>();
@@ -270,6 +840,7 @@ class JetFighterGame
     private List<EnemyJet> enemyJets;
     private Random random;
     private Weather currentWeather = Weather.Clear;
+    private int weatherTurns = 0; // Track how long current weather has persisted
     private double detectionRangeModifier = 1.0;
     private double accuracyModifier = 1.0;
     private int playerAltitude = 1;
@@ -281,6 +852,7 @@ class JetFighterGame
     public double MaxVelocity { get; protected set; }
     public double TurnRate { get; protected set; } // How fast the jet can turn
     public int Altitude { get; set; } // 0-3 altitude levels
+    public int PlayerAltitude => playerAltitude; // Public property to access player altitude
     public int Fuel { get; set; }
     public int MaxFuel { get; protected set; }
 
@@ -389,17 +961,20 @@ class JetFighterGame
         (playerX, playerY) = GenerateRandomPosition();
         grid[playerX, playerY] = playerJet;
 
+        // Place F-16 Falcon
         (int x, int y) = GenerateRandomPosition();
-        enemyJets.Add(new BasicEnemyJet(x, y, this));
-        grid[x, y] = 'E';
+        enemyJets.Add(new F16Falcon(x, y, this));
+        grid[x, y] = 'F';
 
+        // Place Su-27 Flanker
         (x, y) = GenerateRandomPosition();
-        enemyJets.Add(new AdvancedEnemyJet(x, y, this));
-        grid[x, y] = 'A';
-
-        (x, y) = GenerateRandomPosition();
-        enemyJets.Add(new StealthEnemyJet(x, y, this));
+        enemyJets.Add(new Su27Flanker(x, y, this));
         grid[x, y] = 'S';
+
+        // Place F-22 Raptor
+        (x, y) = GenerateRandomPosition();
+        enemyJets.Add(new F22Raptor(x, y, this));
+        grid[x, y] = 'R';
     }
 
     private (int, int) GenerateRandomPosition()
@@ -421,8 +996,13 @@ class JetFighterGame
         Console.WriteLine("RADAR STATUS:");
         foreach (var enemy in enemyJets.Where(e => e.IsDetected))
         {
-            Console.WriteLine($"{enemy.GetType().Name} at ({enemy.X},{enemy.Y}) | " +
-                             $"Alt: {enemy.Altitude} | Health: {enemy.Health}");
+            string stealthInfo = "";
+            if (enemy is F22Raptor raptor && raptor.IsInStealthMode())
+                stealthInfo = " [STEALTH]";
+                
+            Console.WriteLine($"{enemy.AircraftName} at ({enemy.X},{enemy.Y}) | " +
+                             $"Alt: {enemy.Altitude} | Health: {enemy.Health}/{enemy.MaxHealth} | " +
+                             $"State: {enemy.CurrentState}{stealthInfo}");
         }
         
         // Show grid with altitude indicators
@@ -443,9 +1023,15 @@ class JetFighterGame
                     var enemy = enemyJets.FirstOrDefault(e => e.X == i && e.Y == j);
                     if (enemy != null && enemy.IsDetected)
                     {
-                        // Color based on enemy type
-                        Console.ForegroundColor = enemy is StealthEnemyJet ? 
-                            ConsoleColor.DarkGray : ConsoleColor.Red;
+                        // Color based on enemy type and stealth status
+                        if (enemy is F22Raptor raptor && raptor.IsInStealthMode())
+                        {
+                            Console.ForegroundColor = ConsoleColor.DarkGray;
+                        }
+                        else
+                        {
+                            Console.ForegroundColor = ConsoleColor.Red;
+                        }
                         Console.Write(enemy.Symbol + " ");
                         Console.ResetColor();
                     }
@@ -485,10 +1071,16 @@ class JetFighterGame
         
         // Display map legend
         Console.WriteLine("\nMAP LEGEND:");
-        Console.WriteLine("F - Your fighter jet");
+        Console.WriteLine("P - Your fighter jet");
         Console.WriteLine("B - Base/airfield (refuel here)");
         Console.WriteLine("T - Tanker aircraft (refuel when adjacent)");
-        Console.WriteLine("E/A/S - Enemy jets");
+        Console.WriteLine("F - F-16 Fighting Falcon");
+        Console.WriteLine("S - Su-27 Flanker");
+        Console.WriteLine("R - F-22 Raptor (Stealth Fighter)");
+        Console.WriteLine("\nAIRCRAFT INFO:");
+        Console.WriteLine("F-16: Multi-role fighter with advanced radar");
+        Console.WriteLine("Su-27: High-altitude interceptor, very aggressive");
+        Console.WriteLine("F-22: Stealth fighter with advanced AI");
     }
 
     private void EndGame(string message)
@@ -667,10 +1259,10 @@ class JetFighterGame
     {
         int detectionRange = 8; // Base detection range
 
-        // StealthEnemyJet is harder to detect
-        if (enemy is StealthEnemyJet)
-            detectionRange = 4;
-
+        // F-22 Raptor in stealth mode is harder to detect
+        if (enemy is F22Raptor raptor && raptor.IsInStealthMode())
+            detectionRange = 3;
+        
         // Higher altitude increases detection range
         detectionRange += playerAltitude;
 
@@ -693,9 +1285,16 @@ class JetFighterGame
     {
         if (random.NextDouble() < 0.05) // 5% chance to change weather each turn
         {
-            currentWeather = (Weather)random.Next(0, 3);
-            Console.WriteLine($"Weather changing to: {currentWeather}");
+            Weather newWeather = (Weather)random.Next(0, 3);
+            if (newWeather != currentWeather)
+            {
+                currentWeather = newWeather;
+                weatherTurns = 0;
+                Console.WriteLine($"Weather changing to: {currentWeather}");
+            }
         }
+        
+        weatherTurns++; // Increment weather persistence counter
         
         // Apply weather effects
         switch (currentWeather)
@@ -733,8 +1332,9 @@ class JetFighterGame
         if (distance > 5) hitChance -= 0.15;
         if (distance > 8) hitChance -= 0.15;
         
-        // Stealth enemies are harder to hit
-        if (enemy is StealthEnemyJet) hitChance -= 0.2;
+        // Stealth/advanced enemies are harder to hit
+        if (enemy is F22Raptor) hitChance -= 0.25;
+        else if (enemy.CombatExperience > 3) hitChance -= 0.1;
         
         // Roll for hit
         if (random.NextDouble() <= hitChance)
@@ -800,19 +1400,23 @@ class JetFighterGame
     
     private void EnemyAttack(EnemyJet enemy)
     {
-        // Increase base attack chance
-        double attackChance = 0.8; // From 0.75
+        // Base attack chance varies by aircraft type and experience
+        double attackChance = 0.7 + (enemy.CombatExperience * 0.05);
         
-        // Stealth enemies harder to detect but more deadly when they attack
-        if (enemy is StealthEnemyJet) 
+        // F-22 Raptor has higher accuracy
+        if (enemy is F22Raptor)
         {
-            attackChance = 0.7; // From 0.6
+            attackChance = 0.85;
         }
-        
-        // Advanced enemies are more accurate
-        if (enemy is AdvancedEnemyJet)
+        // Su-27 Flanker is also highly accurate
+        else if (enemy is Su27Flanker)
         {
-            attackChance = 0.9; // From 0.85
+            attackChance = 0.82;
+        }
+        // F-16 Falcon has good accuracy
+        else if (enemy is F16Falcon)
+        {
+            attackChance = 0.78;
         }
         
         // Apply weather effects to attack chance
@@ -820,16 +1424,20 @@ class JetFighterGame
         
         if (random.NextDouble() <= attackChance)
         {
-            // Increase damage range for more challenge
-            int baseDamage = enemy is BasicEnemyJet ? random.Next(1, 4) : // Increased upper bound
-                             enemy is AdvancedEnemyJet ? random.Next(2, 5) : // Increased upper bound
-                             random.Next(3, 6); // Stealth jets do most damage, increased upper bound
+            // Damage varies by aircraft type and experience
+            int baseDamage = enemy switch
+            {
+                F16Falcon => random.Next(2, 5),
+                Su27Flanker => random.Next(3, 6),
+                F22Raptor => random.Next(3, 7),
+                _ => random.Next(1, 4)
+            };
             
-            // Critical hit chance increased
-            bool isCrit = random.NextDouble() < 0.25; // From 0.2
+            // Critical hit chance based on experience
+            bool isCrit = random.NextDouble() < (0.15 + enemy.CombatExperience * 0.02);
             int damage = isCrit ? baseDamage * 2 : baseDamage;
             
-            Console.WriteLine($"Enemy {enemy.GetType().Name} hits you for {damage} damage!" + 
+            Console.WriteLine($"Enemy {enemy.AircraftName} hits you for {damage} damage!" + 
                              (isCrit ? " CRITICAL HIT!" : ""));
             playerHealth -= damage;
             
@@ -840,7 +1448,7 @@ class JetFighterGame
         }
         else
         {
-            Console.WriteLine($"Enemy {enemy.GetType().Name} missed!");
+            Console.WriteLine($"Enemy {enemy.AircraftName} missed!");
         }
     }
     
@@ -1081,13 +1689,17 @@ class JetFighterGame
     {
         string[] missionTypes = {
             "Destroy an enemy jet",
-            "Visit all bases",
+            "Visit all bases", 
             "Reach maximum altitude",
             "Perform mid-air refueling",
-            "Survive a storm"
+            "Survive a storm",
+            "Defeat a stealth aircraft",
+            "High altitude combat",
+            "Maintain air superiority",
+            "Reconnaissance mission"
         };
         
-        int rewardPoints = random.Next(50, 201); // 50-200 points
+        int rewardPoints = random.Next(100, 301); // 100-300 points
         string objective = missionTypes[random.Next(missionTypes.Length)];
         string missionName = $"Mission #{++missionCounter}: {objective}";
         
@@ -1105,35 +1717,26 @@ class JetFighterGame
             // Check mission completion based on objective
             bool completed = false;
             
-            if (mission.Objective.Contains("Destroy an enemy jet") && 
-                enemyJets.Count < 3) // Started with 3 enemies
+            if (mission.Objective.Contains("Destroy an enemy jet"))
             {
-                completed = true;
+                // Check if any enemy has been destroyed (started with 3)
+                completed = enemyJets.Count < 3;
             }
             else if (mission.Objective.Contains("Visit all bases"))
             {
-                bool visitedAll = true;
-                foreach (var basePos in basePositions)
-                {
-                    if (playerX != basePos.Item1 || playerY != basePos.Item2)
-                    {
-                        visitedAll = false;
-                        break;
-                    }
-                }
-                completed = visitedAll;
+                // Check if player is currently at any base
+                completed = basePositions.Any(basePos => playerX == basePos.Item1 && playerY == basePos.Item2);
             }
-            else if (mission.Objective.Contains("Reach maximum altitude") &&
-                    playerAltitude == 3)
+            else if (mission.Objective.Contains("Reach maximum altitude"))
             {
-                completed = true;
+                completed = playerAltitude == 3;
             }
             else if (mission.Objective.Contains("Perform mid-air refueling"))
             {
                 // Check if adjacent to a tanker (T)
-                for (int dx = -1; dx <= 1; dx++)
+                for (int dx = -1; dx <= 1 && !completed; dx++)
                 {
-                    for (int dy = -1; dy <= 1; dy++)
+                    for (int dy = -1; dy <= 1 && !completed; dy++)
                     {
                         int nx = playerX + dx;
                         int ny = playerY + dy;
@@ -1143,16 +1746,25 @@ class JetFighterGame
                             grid[nx, ny] == 'T')
                         {
                             completed = true;
-                            break;
                         }
                     }
-                    if (completed) break;
                 }
             }
-            else if (mission.Objective.Contains("Survive a storm") &&
-                    currentWeather == Weather.Storm)
+            else if (mission.Objective.Contains("Survive a storm"))
             {
-                completed = true;
+                // Must survive for multiple turns in a storm
+                completed = currentWeather == Weather.Storm && weatherTurns >= 5;
+            }
+            else if (mission.Objective.Contains("Defeat a stealth aircraft"))
+            {
+                // Check if F-22 Raptor has been destroyed
+                completed = !enemyJets.Any(e => e is F22Raptor);
+            }
+            else if (mission.Objective.Contains("High altitude combat"))
+            {
+                // Complete combat at altitude 3
+                completed = playerAltitude == 3 && 
+                           enemyJets.Any(e => Math.Abs(e.X - playerX) <= 2 && Math.Abs(e.Y - playerY) <= 2);
             }
             
             if (completed)
