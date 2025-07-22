@@ -782,6 +782,7 @@ class JetFighterGame
 
     private bool afterburnerEnabled = false;
     private List<(int, int)> basePositions = new List<(int, int)>();
+    private List<(int, int)> tankerPositions = new List<(int, int)>(); // Track tanker positions
 
     // Message system methods
     private void AddMessage(string message, ConsoleColor color = ConsoleColor.White, bool urgent = false)
@@ -925,6 +926,7 @@ class JetFighterGame
         // Add mid-air refueling tankers (1 of them) that move slowly
         var (tankerX, tankerY) = GenerateRandomPosition();
         grid[tankerX, tankerY] = 'T'; // T for Tanker
+        tankerPositions.Add((tankerX, tankerY)); // Track tanker position
     }
 
     private void PlaceJetFighters()
@@ -1125,6 +1127,8 @@ class JetFighterGame
             DisplayTypingMessage($"💀 {enemy.AircraftName} DESTROYED! Excellent shooting, pilot!", ConsoleColor.Green, 40);
             DisplayTypingMessage($"🏆 +{enemy.ScoreValue} points earned", ConsoleColor.Yellow);
             
+            // Clear enemy from grid before removing from list
+            grid[enemy.X, enemy.Y] = '.';
             enemyJets.Remove(enemy);
             score += enemy.ScoreValue;
             
@@ -1251,10 +1255,24 @@ class JetFighterGame
             // Update grid with new enemy position (only if enemy is still alive)
             if (enemyJets.Contains(jet))
             {
-                // Make sure we don't overwrite the player position
-                if (!(jet.X == playerX && jet.Y == playerY))
+                // Make sure we don't overwrite the player position or fixed infrastructure
+                if (!(jet.X == playerX && jet.Y == playerY) && 
+                    !basePositions.Contains((jet.X, jet.Y)) && 
+                    !tankerPositions.Contains((jet.X, jet.Y)))
                     grid[jet.X, jet.Y] = jet.Symbol;
             }
+        }
+
+        // Restore infrastructure positions that may have been overwritten
+        foreach (var (x, y) in basePositions)
+        {
+            if (!(x == playerX && y == playerY))
+                grid[x, y] = 'B';
+        }
+        foreach (var (x, y) in tankerPositions)
+        {
+            if (!(x == playerX && y == playerY))
+                grid[x, y] = 'T';
         }
 
         // Check for combat encounters after all enemies have moved
@@ -1562,6 +1580,10 @@ class JetFighterGame
     {
         foreach (var mission in activeMissions.ToList())
         {
+            // Skip if mission is already complete
+            if (mission.IsComplete)
+                continue;
+                
             // Check mission completion based on objective
             bool completed = false;
             
@@ -1638,6 +1660,7 @@ class JetFighterGame
 
     private void CompleteActiveMission(Mission mission)
     {
+        mission.Complete(); // Mark mission as complete
         activeMissions.Remove(mission);
         completedMissions.Add(mission);
         
