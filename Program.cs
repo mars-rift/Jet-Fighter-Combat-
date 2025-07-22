@@ -743,6 +743,7 @@ class JetFighterGame
     private enum GameState { Playing, Victory, Defeat }
 
     private GameState currentState = GameState.Playing;
+    public bool IsGameActive => currentState == GameState.Playing;
     private const int gridSize = 20;
     private char[,] grid;
     private int playerX, playerY;
@@ -2106,7 +2107,7 @@ class Program
         game.InitializeMissions(); // Initialize missions
         game.DisplayGrid();
 
-        while (true)
+        while (game.IsGameActive)
         {
             Console.Write("\nEnter move or action: ");
             string? input = Console.ReadLine();
@@ -2131,9 +2132,13 @@ class Program
                 game.MovePlayer(input);
             }
             
-            game.MoveEnemies();
-            game.CheckMissionProgress();
-            game.DisplayGrid();
+            // Only continue with game logic if game is still active
+            if (game.IsGameActive)
+            {
+                game.MoveEnemies();
+                game.CheckMissionProgress();
+                game.DisplayGrid();
+            }
         }
     }
 }
