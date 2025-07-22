@@ -1069,9 +1069,10 @@ class JetFighterGame
         double distance = Math.Sqrt(Math.Pow(enemy.X - playerX, 2) + Math.Pow(enemy.Y - playerY, 2));
         string distanceDesc = distance switch
         {
-            <= 2 => "POINT BLANK RANGE",
-            <= 4 => "Close range",
-            <= 8 => "Medium range",
+            <= 1 => "POINT BLANK RANGE",
+            <= 2 => "Close range",
+            <= 3 => "Medium-close range",
+            <= 5 => "Medium range",
             _ => "Long range"
         };
         
@@ -1145,30 +1146,33 @@ class JetFighterGame
 
     private void CheckForCombatEncounters()
     {
-        // Check for enemies within different combat ranges
+        // Check for enemies within different combat ranges - more balanced for gameplay
         foreach (var enemy in enemyJets.ToList())
         {
             double distance = Math.Sqrt(Math.Pow(enemy.X - playerX, 2) + Math.Pow(enemy.Y - playerY, 2));
             
-            // Combat ranges: Point blank (0-1), Close (1-3), Medium (3-6), Long (6-10)
+            // More balanced combat ranges allowing for tactical movement
             bool shouldEngage = false;
             
-            if (distance <= 1) // Point blank range - automatic engagement
+            if (distance <= 1) // Point blank range - very high chance but not automatic
             {
-                shouldEngage = true;
+                shouldEngage = random.NextDouble() < 0.85;
             }
-            else if (distance <= 3) // Close range - high chance
+            else if (distance <= 2) // Close range - moderate chance
             {
-                shouldEngage = random.NextDouble() < 0.8;
+                shouldEngage = random.NextDouble() < 0.35;
             }
-            else if (distance <= 6) // Medium range - moderate chance
+            else if (distance <= 3) // Medium-close range - lower chance
             {
-                shouldEngage = random.NextDouble() < 0.4;
+                shouldEngage = random.NextDouble() < 0.15;
             }
-            else if (distance <= 10) // Long range - low chance, only if detected
+            else if (distance <= 5) // Medium range - very low chance, only if enemy is aggressive
             {
-                shouldEngage = enemy.IsDetected && random.NextDouble() < 0.15;
+                shouldEngage = enemy.IsDetected && 
+                              (enemy.CurrentState == EnemyState.Chasing || enemy.CurrentState == EnemyState.Diving) && 
+                              random.NextDouble() < 0.08;
             }
+            // Removed long range combat to allow more free movement
             
             if (shouldEngage)
             {
@@ -1294,26 +1298,27 @@ class JetFighterGame
 
     private void CheckForEnemyCombatInitiation()
     {
-        // Allow enemies to initiate combat when they get close to the player
+        // Allow enemies to initiate combat when they get close, but less aggressively
         foreach (var enemy in enemyJets.ToList())
         {
             double distance = Math.Sqrt(Math.Pow(enemy.X - playerX, 2) + Math.Pow(enemy.Y - playerY, 2));
             
-            // Enemies can initiate combat based on their state and distance
+            // Enemies can initiate combat based on their state and distance - more tactical
             bool shouldInitiate = false;
             
-            if (distance <= 1 && enemy.CurrentState == EnemyState.Chasing) // Aggressive close combat
+            if (distance <= 1 && enemy.CurrentState == EnemyState.Chasing) // Very close aggressive combat
             {
-                shouldInitiate = random.NextDouble() < 0.9;
+                shouldInitiate = random.NextDouble() < 0.6; // Reduced from 0.9
             }
-            else if (distance <= 2 && enemy.CurrentState == EnemyState.Diving) // Diving attack
+            else if (distance <= 1 && enemy.CurrentState == EnemyState.Diving) // Diving attack at close range
             {
-                shouldInitiate = random.NextDouble() < 0.7;
+                shouldInitiate = random.NextDouble() < 0.7; // Only when very close
             }
-            else if (distance <= 3 && enemy.CurrentState == EnemyState.Flanking) // Flanking maneuver
+            else if (distance <= 2 && enemy.CurrentState == EnemyState.Flanking) // Flanking maneuver
             {
-                shouldInitiate = random.NextDouble() < 0.5;
+                shouldInitiate = random.NextDouble() < 0.25; // Reduced from 0.5
             }
+            // Removed longer range enemy attacks to give player more breathing room
             
             if (shouldInitiate)
             {
@@ -1481,7 +1486,7 @@ class JetFighterGame
     {
         string[] missionTypes = {
             "Destroy an enemy jet",
-            "Visit all bases", 
+            "Visit any base", 
             "Reach maximum altitude",
             "Perform mid-air refueling",
             "Survive a storm",
@@ -1564,11 +1569,10 @@ class JetFighterGame
                 // Check if any enemy has been destroyed (started with 3) - only complete if count actually decreased
                 completed = enemyJets.Count < 3 && score > 0; // Ensure we actually scored points from destroying enemies
             }
-            else if (mission.Objective.Contains("Visit all bases"))
+            else if (mission.Objective.Contains("Visit any base"))
             {
-                // Check if player is currently at any base - need to visit ALL bases, not just one
+                // Check if player is currently at any base
                 bool visitedBase = basePositions.Any(basePos => playerX == basePos.Item1 && playerY == basePos.Item2);
-                // For now, just check if at any base (in future could track visited bases)
                 completed = visitedBase;
             }
             else if (mission.Objective.Contains("Reach maximum altitude"))
