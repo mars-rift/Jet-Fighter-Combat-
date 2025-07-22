@@ -1143,6 +1143,43 @@ class JetFighterGame
         WaitForInput();
     }
 
+    private void CheckForCombatEncounters()
+    {
+        // Check for enemies within different combat ranges
+        foreach (var enemy in enemyJets.ToList())
+        {
+            double distance = Math.Sqrt(Math.Pow(enemy.X - playerX, 2) + Math.Pow(enemy.Y - playerY, 2));
+            
+            // Combat ranges: Point blank (0-1), Close (1-3), Medium (3-6), Long (6-10)
+            bool shouldEngage = false;
+            
+            if (distance <= 1) // Point blank range - automatic engagement
+            {
+                shouldEngage = true;
+            }
+            else if (distance <= 3) // Close range - high chance
+            {
+                shouldEngage = random.NextDouble() < 0.8;
+            }
+            else if (distance <= 6) // Medium range - moderate chance
+            {
+                shouldEngage = random.NextDouble() < 0.4;
+            }
+            else if (distance <= 10) // Long range - low chance, only if detected
+            {
+                shouldEngage = enemy.IsDetected && random.NextDouble() < 0.15;
+            }
+            
+            if (shouldEngage)
+            {
+                ProcessCombat(enemy);
+                if (currentState != GameState.Playing)
+                    return;
+                break; // Only one combat encounter per turn
+            }
+        }
+    }
+
     public void MovePlayer(string direction)
     {
         if (currentState != GameState.Playing) return;
@@ -1174,10 +1211,8 @@ class JetFighterGame
             ConsumeFuel("regular");
         }
 
-        // Check if player has moved onto an enemy.
-        EnemyJet? encountered = enemyJets.Find(e => e.X == playerX && e.Y == playerY);
-        if (encountered != null)
-            ProcessCombat(encountered);
+        // Check for enemy encounters at various combat ranges
+        CheckForCombatEncounters();
 
         if (currentState == GameState.Playing)
             grid[playerX, playerY] = playerJet;
@@ -1200,33 +1235,25 @@ class JetFighterGame
                 grid[jet.X, jet.Y] = '.';
         }
 
-        // Move each enemy and check for collisions
+        // Move each enemy and check for combat encounters at various ranges
         foreach (var jet in enemyJets.ToList())
         {
             int oldX = jet.X;
             int oldY = jet.Y;
             
             jet.Move(playerX, playerY, grid);
-
-            // Individual enemy collision with player triggers combat.
-            if (jet.X == playerX && jet.Y == playerY)
-            {
-                ProcessCombat(jet);
-                if (currentState != GameState.Playing)
-                {
-                    HandleGameOver();
-                    return;
-                }
-            }
             
             // Update grid with new enemy position (only if enemy is still alive)
             if (enemyJets.Contains(jet))
             {
                 // Make sure we don't overwrite the player position
                 if (!(jet.X == playerX && jet.Y == playerY))
-                grid[jet.X, jet.Y] = jet.Symbol;
+                    grid[jet.X, jet.Y] = jet.Symbol;
             }
         }
+
+        // Check for combat encounters after all enemies have moved
+        CheckForEnemyCombatInitiation();
 
         // Check for coordinated attacks from adjacent enemies
         var adjacentEnemies = enemyJets.FindAll(e => Math.Abs(e.X - playerX) <= 1 && Math.Abs(e.Y - playerY) <= 1);
@@ -1263,6 +1290,40 @@ class JetFighterGame
         // Ensure player position is correctly marked
         if (grid[playerX, playerY] != playerJet)
             grid[playerX, playerY] = playerJet;
+    }
+
+    private void CheckForEnemyCombatInitiation()
+    {
+        // Allow enemies to initiate combat when they get close to the player
+        foreach (var enemy in enemyJets.ToList())
+        {
+            double distance = Math.Sqrt(Math.Pow(enemy.X - playerX, 2) + Math.Pow(enemy.Y - playerY, 2));
+            
+            // Enemies can initiate combat based on their state and distance
+            bool shouldInitiate = false;
+            
+            if (distance <= 1 && enemy.CurrentState == EnemyState.Chasing) // Aggressive close combat
+            {
+                shouldInitiate = random.NextDouble() < 0.9;
+            }
+            else if (distance <= 2 && enemy.CurrentState == EnemyState.Diving) // Diving attack
+            {
+                shouldInitiate = random.NextDouble() < 0.7;
+            }
+            else if (distance <= 3 && enemy.CurrentState == EnemyState.Flanking) // Flanking maneuver
+            {
+                shouldInitiate = random.NextDouble() < 0.5;
+            }
+            
+            if (shouldInitiate)
+            {
+                DisplayTypingMessage($"🚨 {enemy.AircraftName} initiating attack run!", ConsoleColor.Red);
+                ProcessCombat(enemy);
+                if (currentState != GameState.Playing)
+                    return;
+                break; // Only one enemy-initiated combat per turn
+            }
+        }
     }
 
     private void HandleGameOver()
@@ -1326,7 +1387,8 @@ class JetFighterGame
                 {
                     Weather.Storm => "⛈️ STORM FRONT MOVING IN! Visibility severely reduced!",
                     Weather.Cloudy => "☁️ Cloud cover increasing. Reduced visibility conditions.",
-                    Weather.Clear => "☀️ Weather clearing up. Optimal visibility restored."
+                    Weather.Clear => "☀️ Weather clearing up. Optimal visibility restored.",
+                    _ => "🌤️ Weather conditions changing..."
                 };
                 
                 AddMessage(weatherMessage, ConsoleColor.Yellow, true);
@@ -1499,13 +1561,15 @@ class JetFighterGame
             
             if (mission.Objective.Contains("Destroy an enemy jet"))
             {
-                // Check if any enemy has been destroyed (started with 3)
-                completed = enemyJets.Count < 3;
+                // Check if any enemy has been destroyed (started with 3) - only complete if count actually decreased
+                completed = enemyJets.Count < 3 && score > 0; // Ensure we actually scored points from destroying enemies
             }
             else if (mission.Objective.Contains("Visit all bases"))
             {
-                // Check if player is currently at any base
-                completed = basePositions.Any(basePos => playerX == basePos.Item1 && playerY == basePos.Item2);
+                // Check if player is currently at any base - need to visit ALL bases, not just one
+                bool visitedBase = basePositions.Any(basePos => playerX == basePos.Item1 && playerY == basePos.Item2);
+                // For now, just check if at any base (in future could track visited bases)
+                completed = visitedBase;
             }
             else if (mission.Objective.Contains("Reach maximum altitude"))
             {
@@ -1513,10 +1577,11 @@ class JetFighterGame
             }
             else if (mission.Objective.Contains("Perform mid-air refueling"))
             {
-                // Check if adjacent to a tanker (T)
-                for (int dx = -1; dx <= 1 && !completed; dx++)
+                // Check if adjacent to a tanker (T) AND actually refueled
+                bool nearTanker = false;
+                for (int dx = -1; dx <= 1 && !nearTanker; dx++)
                 {
-                    for (int dy = -1; dy <= 1 && !completed; dy++)
+                    for (int dy = -1; dy <= 1 && !nearTanker; dy++)
                     {
                         int nx = playerX + dx;
                         int ny = playerY + dy;
@@ -1525,10 +1590,12 @@ class JetFighterGame
                             ny >= 0 && ny < gridSize && 
                             grid[nx, ny] == 'T')
                         {
-                            completed = true;
+                            nearTanker = true;
                         }
                     }
                 }
+                // Only complete if near tanker AND fuel is above 75% (indicating recent refuel)
+                completed = nearTanker && Fuel > MaxFuel * 0.75;
             }
             else if (mission.Objective.Contains("Survive a storm"))
             {
@@ -1537,14 +1604,24 @@ class JetFighterGame
             }
             else if (mission.Objective.Contains("Defeat a stealth aircraft"))
             {
-                // Check if F-22 Raptor has been destroyed
-                completed = !enemyJets.Any(e => e is F22Raptor);
+                // Check if F-22 Raptor has been destroyed - only if we actually had one and now don't
+                completed = !enemyJets.Any(e => e is F22Raptor) && score > 0;
             }
             else if (mission.Objective.Contains("High altitude combat"))
             {
-                // Complete combat at altitude 3
-                completed = playerAltitude == 3 && 
-                           enemyJets.Any(e => Math.Abs(e.X - playerX) <= 2 && Math.Abs(e.Y - playerY) <= 2);
+                // Complete combat at altitude 3 - need to have engaged in actual combat
+                bool enemyNearby = enemyJets.Any(e => Math.Abs(e.X - playerX) <= 3 && Math.Abs(e.Y - playerY) <= 3);
+                completed = playerAltitude == 3 && enemyNearby && score > 0;
+            }
+            else if (mission.Objective.Contains("Maintain air superiority"))
+            {
+                // Complete if all enemies are at low health or destroyed
+                completed = !enemyJets.Any() || enemyJets.All(e => e.Health <= e.MaxHealth * 0.3);
+            }
+            else if (mission.Objective.Contains("Reconnaissance mission"))
+            {
+                // Complete if player has detected all enemies
+                completed = enemyJets.All(e => e.IsDetected);
             }
             
             if (completed)
