@@ -1086,21 +1086,21 @@ class JetFighterGame
             Console.WriteLine("═══════════════════════════════════════════════════════════════════");
             Console.WriteLine();
             
-            Console.WriteLine("📊 FINAL COMBAT STATISTICS:");
-            Console.WriteLine($"   ❤️  Final Health: {playerHealth}/5");
-            Console.WriteLine($"   🏆 Final Score: {score}");
-            Console.WriteLine($"   ✈️  Final Altitude: {playerAltitude}");
-            Console.WriteLine($"   ⛽ Remaining Fuel: {Fuel}/{MaxFuel}");
-            Console.WriteLine($"   🎯 Completed Missions: {completedMissions.Count}");
-            Console.WriteLine($"   ⚔️  Enemies Remaining: {enemyJets.Count}");
+            Console.WriteLine("[STATS] FINAL COMBAT STATISTICS:");
+            Console.WriteLine($"   [HP]  Final Health: {playerHealth}/5");
+            Console.WriteLine($"   [PTS] Final Score: {score}");
+            Console.WriteLine($"   [ALT] Final Altitude: {playerAltitude}");
+            Console.WriteLine($"   [FUEL] Remaining Fuel: {Fuel}/{MaxFuel}");
+            Console.WriteLine($"   [MISS] Completed Missions: {completedMissions.Count}");
+            Console.WriteLine($"   [ENMY] Enemies Remaining: {enemyJets.Count}");
             
             if (completedMissions.Count > 0)
             {
                 Console.WriteLine();
-                Console.WriteLine("🏅 COMPLETED MISSIONS:");
+                Console.WriteLine("[COMPLETE] COMPLETED MISSIONS:");
                 foreach (var mission in completedMissions)
                 {
-                    Console.WriteLine($"   ✅ {mission.Objective} (+{mission.RewardPoints} pts)");
+                    Console.WriteLine($"   [OK] {mission.Objective} (+{mission.RewardPoints} pts)");
                 }
             }
             
@@ -1131,7 +1131,7 @@ class JetFighterGame
     private void ProcessCombat(EnemyJet enemy)
     {
         Console.Clear();
-        DisplayTypingMessage($"🚨 ENEMY CONTACT! {enemy.AircraftName} detected at {enemy.X},{enemy.Y}!", ConsoleColor.Red);
+        DisplayTypingMessage($"[ALERT] ENEMY CONTACT! {enemy.AircraftName} detected at {enemy.X},{enemy.Y}!", ConsoleColor.Red);
         
         double distance = Math.Sqrt(Math.Pow(enemy.X - playerX, 2) + Math.Pow(enemy.Y - playerY, 2));
         string distanceDesc = distance switch
@@ -1159,23 +1159,23 @@ class JetFighterGame
             case "1": // Fire missile
                 if (TryFireWeapon("Missile", enemy, 7))
                 {
-                    DisplayTypingMessage("🚀 MISSILE AWAY! Tracking target...", ConsoleColor.Yellow, 50);
+                    DisplayTypingMessage("[MISSILE] MISSILE AWAY! Tracking target...", ConsoleColor.Yellow, 50);
                     System.Threading.Thread.Sleep(1000);
                 }
                 break;
             case "2": // Gun attack
                 if (TryFireWeapon("Gun", enemy, 3))
                 {
-                    DisplayTypingMessage("💥 GUNS GUNS GUNS! Engaging with cannon!", ConsoleColor.Red, 40);
+                    DisplayTypingMessage("[GUNS] GUNS GUNS GUNS! Engaging with cannon!", ConsoleColor.Red, 40);
                     System.Threading.Thread.Sleep(800);
                 }
                 break;
             case "3": // Evasive maneuver
-                DisplayTypingMessage("🌪️ Executing evasive maneuvers!", ConsoleColor.Green, 40);
+                DisplayTypingMessage("[EVADE] Executing evasive maneuvers!", ConsoleColor.Green, 40);
                 PerformEvasiveManeuver();
                 break;
             default:
-                DisplayTypingMessage("❌ Combat opportunity missed! No action taken.", ConsoleColor.DarkRed);
+                DisplayTypingMessage("[MISS] Combat opportunity missed! No action taken.", ConsoleColor.DarkRed);
                 break;
         }
         
@@ -1183,13 +1183,13 @@ class JetFighterGame
         if (enemy.Health > 0)
         {
             System.Threading.Thread.Sleep(500);
-            DisplayTypingMessage("⚠️ Enemy counterattack incoming!", ConsoleColor.Red);
+            DisplayTypingMessage("[WARNING] Enemy counterattack incoming!", ConsoleColor.Red);
             EnemyAttack(enemy);
         }
         else
         {
-            DisplayTypingMessage($"💀 {enemy.AircraftName} DESTROYED! Excellent shooting, pilot!", ConsoleColor.Green, 40);
-            DisplayTypingMessage($"🏆 +{enemy.ScoreValue} points earned", ConsoleColor.Yellow);
+            DisplayTypingMessage($"[KILL] {enemy.AircraftName} DESTROYED! Excellent shooting, pilot!", ConsoleColor.Green, 40);
+            DisplayTypingMessage($"[SCORE] +{enemy.ScoreValue} points earned", ConsoleColor.Yellow);
             
             // Clear enemy from grid before removing from list
             grid[enemy.X, enemy.Y] = '.';
@@ -1206,7 +1206,7 @@ class JetFighterGame
             if (enemyJets.Count == 0)
             {
                 currentState = GameState.Victory;
-                DisplayTypingMessage("🎉 ALL ENEMIES NEUTRALIZED! MISSION ACCOMPLISHED!", ConsoleColor.Green, 50);
+                DisplayTypingMessage("[VICTORY] ALL ENEMIES NEUTRALIZED! MISSION ACCOMPLISHED!", ConsoleColor.Green, 50);
                 System.Threading.Thread.Sleep(1500); // Give time to read the victory message
                 HandleGameOver();
                 return;
@@ -1357,8 +1357,8 @@ class JetFighterGame
                 return isCrit ? baseDamage * 2 : baseDamage;
             });
             
-            DisplayTypingMessage("🚨 MULTIPLE BOGEYS! Coordinated enemy attack detected!", ConsoleColor.Red, 50);
-            DisplayTypingMessage($"💥 Combined assault deals {totalDamage} damage!", ConsoleColor.Red);
+            DisplayTypingMessage("[MULTI] MULTIPLE BOGEYS! Coordinated enemy attack detected!", ConsoleColor.Red, 50);
+            DisplayTypingMessage($"[DAMAGE] Combined assault deals {totalDamage} damage!", ConsoleColor.Red);
             
             playerHealth -= totalDamage;
             if (playerHealth <= 0)
@@ -1408,7 +1408,7 @@ class JetFighterGame
             
             if (shouldInitiate)
             {
-                DisplayTypingMessage($"🚨 {enemy.AircraftName} initiating attack run!", ConsoleColor.Red);
+                DisplayTypingMessage($"[ATTACK] {enemy.AircraftName} initiating attack run!", ConsoleColor.Red);
                 ProcessCombat(enemy);
                 if (currentState != GameState.Playing)
                     return;
@@ -1479,10 +1479,10 @@ class JetFighterGame
                 
                 string weatherMessage = currentWeather switch
                 {
-                    Weather.Storm => "⛈️ STORM FRONT MOVING IN! Visibility severely reduced!",
-                    Weather.Cloudy => "☁️ Cloud cover increasing. Reduced visibility conditions.",
-                    Weather.Clear => "☀️ Weather clearing up. Optimal visibility restored.",
-                    _ => "🌤️ Weather conditions changing..."
+                    Weather.Storm => "[STORM] STORM FRONT MOVING IN! Visibility severely reduced!",
+                    Weather.Cloudy => "[CLOUD] Cloud cover increasing. Reduced visibility conditions.",
+                    Weather.Clear => "[CLEAR] Weather clearing up. Optimal visibility restored.",
+                    _ => "[WEATHER] Weather conditions changing..."
                 };
                 
                 AddMessage(weatherMessage, ConsoleColor.Yellow, true);
@@ -1490,11 +1490,11 @@ class JetFighterGame
                 // Additional weather effects messaging
                 if (currentWeather == Weather.Storm)
                 {
-                    AddMessage("⚠️ Storm conditions: -50% detection range, -30% accuracy!", ConsoleColor.Red);
+                    AddMessage("[EFFECT] Storm conditions: -50% detection range, -30% accuracy!", ConsoleColor.Red);
                 }
                 else if (currentWeather == Weather.Cloudy)
                 {
-                    AddMessage("⚠️ Cloudy conditions: -20% detection range, -10% accuracy.", ConsoleColor.Yellow);
+                    AddMessage("[EFFECT] Cloudy conditions: -20% detection range, -10% accuracy.", ConsoleColor.Yellow);
                 }
             }
         }
@@ -1535,8 +1535,8 @@ class JetFighterGame
                 _ => $"Altitude level {playerAltitude}"
             };
             
-            DisplayTypingMessage($"⬆️ Climbing to {altitudeDesc}", ConsoleColor.Cyan);
-            DisplayTypingMessage("✈️ Engine power increased - fuel consumption higher during climb.", ConsoleColor.Yellow);
+            DisplayTypingMessage($"[CLIMB] Climbing to {altitudeDesc}", ConsoleColor.Cyan);
+            DisplayTypingMessage("[ENGINE] Engine power increased - fuel consumption higher during climb.", ConsoleColor.Yellow);
         }
         else if (!increase && playerAltitude > 0)
         {
@@ -1558,16 +1558,16 @@ class JetFighterGame
                 _ => $"Altitude level {playerAltitude}"
             };
             
-            DisplayTypingMessage($"⬇️ Descending from {currentDesc} to {newDesc}", ConsoleColor.Green);
+            DisplayTypingMessage($"[DESCEND] Descending from {currentDesc} to {newDesc}", ConsoleColor.Green);
             if (playerAltitude == 0)
-                DisplayTypingMessage("⚠️ WARNING: At ground level - limited maneuverability!", ConsoleColor.Red);
+                DisplayTypingMessage("[WARNING] WARNING: At ground level - limited maneuverability!", ConsoleColor.Red);
         }
         else
         {
             if (increase)
-                DisplayTypingMessage("⚠️ Maximum service ceiling reached! Cannot climb higher.", ConsoleColor.Yellow);
+                DisplayTypingMessage("[LIMIT] Maximum service ceiling reached! Cannot climb higher.", ConsoleColor.Yellow);
             else
-                DisplayTypingMessage("⚠️ Already at minimum safe altitude!", ConsoleColor.Yellow);
+                DisplayTypingMessage("[LIMIT] Already at minimum safe altitude!", ConsoleColor.Yellow);
         }
     }
 
@@ -1592,16 +1592,16 @@ class JetFighterGame
         Mission newMission = new Mission(missionName, rewardPoints);
         activeMissions.Add(newMission);
         
-        DisplayTypingMessage($"📡 NEW MISSION BRIEFING RECEIVED!", ConsoleColor.Cyan, 40);
-        DisplayTypingMessage($"🎯 {missionName}", ConsoleColor.White);
-        DisplayTypingMessage($"💰 Mission reward: {rewardPoints} points", ConsoleColor.Yellow);
-        DisplayTypingMessage("📋 Check mission status with 'm' command", ConsoleColor.Green);
+        DisplayTypingMessage($"[RADIO] NEW MISSION BRIEFING RECEIVED!", ConsoleColor.Cyan, 40);
+        DisplayTypingMessage($"[TARGET] {missionName}", ConsoleColor.White);
+        DisplayTypingMessage($"[REWARD] Mission reward: {rewardPoints} points", ConsoleColor.Yellow);
+        DisplayTypingMessage("[INFO] Check mission status with 'm' command", ConsoleColor.Green);
     }
 
     public void DisplayMissions()
     {
         Console.Clear();
-        DisplayTypingMessage("📋 MISSION BRIEFING SYSTEM", ConsoleColor.Cyan, 40);
+        DisplayTypingMessage("[MISSIONS] MISSION BRIEFING SYSTEM", ConsoleColor.Cyan, 40);
         Console.WriteLine();
         
         Console.WriteLine("┌─ ACTIVE MISSIONS ──────────────────────────────────────────────────┐");
@@ -1613,7 +1613,7 @@ class JetFighterGame
         {
             foreach (var mission in activeMissions)
             {
-                Console.WriteLine($"│ 🎯 {mission.Objective,-50} Reward: {mission.RewardPoints,4} pts │");
+                Console.WriteLine($"│ [ACTIVE] {mission.Objective,-50} Reward: {mission.RewardPoints,4} pts │");
             }
         }
         Console.WriteLine("└─────────────────────────────────────────────────────────────────────┘");
@@ -1628,7 +1628,7 @@ class JetFighterGame
         {
             foreach (var mission in completedMissions)
             {
-                Console.WriteLine($"│ ✅ {mission.Objective,-50} Reward: {mission.RewardPoints,4} pts │");
+                Console.WriteLine($"│ [DONE] {mission.Objective,-50} Reward: {mission.RewardPoints,4} pts │");
             }
         }
         Console.WriteLine("└─────────────────────────────────────────────────────────────────────┘");
@@ -1734,9 +1734,9 @@ class JetFighterGame
         activeMissions.Remove(mission);
         completedMissions.Add(mission);
         
-        DisplayTypingMessage("🎯 MISSION ACCOMPLISHED!", ConsoleColor.Green, 50);
-        DisplayTypingMessage($"✅ {mission.Objective}", ConsoleColor.White);
-        DisplayTypingMessage($"💰 Mission reward: {mission.RewardPoints} points", ConsoleColor.Yellow);
+        DisplayTypingMessage("[SUCCESS] MISSION ACCOMPLISHED!", ConsoleColor.Green, 50);
+        DisplayTypingMessage($"[COMPLETE] {mission.Objective}", ConsoleColor.White);
+        DisplayTypingMessage($"[REWARD] Mission reward: {mission.RewardPoints} points", ConsoleColor.Yellow);
         
         score += mission.RewardPoints;
         
@@ -1755,7 +1755,7 @@ class JetFighterGame
         int ammo = weaponType == "Missile" ? missileAmmo : gunAmmo;
         if (ammo <= 0)
         {
-            DisplayTypingMessage($"❌ OUT OF {weaponType.ToUpper()} AMMO! Weapon dry!", ConsoleColor.Red);
+            DisplayTypingMessage($"[NO AMMO] OUT OF {weaponType.ToUpper()} AMMO! Weapon dry!", ConsoleColor.Red);
             return false;
         }
         
@@ -1772,7 +1772,7 @@ class JetFighterGame
         else if (enemy.CombatExperience > 3) hitChance -= 0.1;
         
         // Display targeting information
-        DisplayTypingMessage($"🎯 Targeting {enemy.AircraftName}...", ConsoleColor.Cyan, 20);
+        DisplayTypingMessage($"[TARGET] Targeting {enemy.AircraftName}...", ConsoleColor.Cyan, 20);
         DisplayTypingMessage($"Hit probability: {hitChance * 100:F0}%", ConsoleColor.Yellow);
         
         // Roll for hit
@@ -1783,15 +1783,13 @@ class JetFighterGame
             int damage = baseDmg * PlayerDamage;
             enemy.Health -= damage;
             
-            string hitMessage = weaponType == "Missile" ? 
-                $"💥 DIRECT HIT! Missile impact confirmed! {damage} damage dealt!" :
-                $"💥 TARGET HIT! Cannon rounds on target! {damage} damage dealt!";
-            
-            DisplayTypingMessage(hitMessage, ConsoleColor.Green, 30);
+            string hitMessage = weaponType == "Missile" ?
+                $"[IMPACT] DIRECT HIT! Missile impact confirmed! {damage} damage dealt!" :
+                $"[HIT] TARGET HIT! Cannon rounds on target! {damage} damage dealt!";            DisplayTypingMessage(hitMessage, ConsoleColor.Green, 30);
             
             if (damage > baseDmg * 1.5) // High damage
-                DisplayTypingMessage("🔥 CRITICAL DAMAGE! Excellent marksmanship!", ConsoleColor.Yellow);
-            
+                DisplayTypingMessage("[CRITICAL] CRITICAL DAMAGE! Excellent marksmanship!", ConsoleColor.Yellow);
+
             // Reduce ammo
             if (weaponType == "Missile")
                 missileAmmo--;
@@ -1802,15 +1800,13 @@ class JetFighterGame
         }
         else
         {
-            string missMessage = weaponType == "Missile" ? 
-                "❌ MISSILE MISS! Target evaded - negative impact!" :
-                "❌ SHOTS WIDE! Cannon fire ineffective!";
-            
-            DisplayTypingMessage(missMessage, ConsoleColor.Red);
+            string missMessage = weaponType == "Missile" ?
+                "[MISS] MISSILE MISS! Target evaded - negative impact!" :
+                "[MISS] SHOTS WIDE! Cannon fire ineffective!";            DisplayTypingMessage(missMessage, ConsoleColor.Red);
             
             // Weather/conditions affecting accuracy
             if (currentWeather == Weather.Storm)
-                DisplayTypingMessage("⛈️ Storm conditions affecting targeting accuracy!", ConsoleColor.DarkYellow);
+                DisplayTypingMessage("[STORM] Storm conditions affecting targeting accuracy!", ConsoleColor.DarkYellow);
             
             if (weaponType == "Missile")
                 missileAmmo--;
@@ -1830,19 +1826,19 @@ class JetFighterGame
         if (enemy is F22Raptor)
         {
             attackChance = 0.85;
-            DisplayTypingMessage("⚠️ F-22 Raptor locking weapons systems!", ConsoleColor.Red);
+            DisplayTypingMessage("[WARNING] F-22 Raptor locking weapons systems!", ConsoleColor.Red);
         }
         // Su-27 Flanker is also highly accurate
         else if (enemy is Su27Flanker)
         {
             attackChance = 0.82;
-            DisplayTypingMessage("⚠️ Su-27 Flanker engaging with missiles!", ConsoleColor.Red);
+            DisplayTypingMessage("[WARNING] Su-27 Flanker engaging with missiles!", ConsoleColor.Red);
         }
         // F-16 Falcon has good accuracy
         else if (enemy is F16Falcon)
         {
             attackChance = 0.78;
-            DisplayTypingMessage("⚠️ F-16 Fighting Falcon opening fire!", ConsoleColor.Red);
+            DisplayTypingMessage("[WARNING] F-16 Fighting Falcon opening fire!", ConsoleColor.Red);
         }
         
         // Apply weather effects to attack chance
@@ -1867,28 +1863,28 @@ class JetFighterGame
             
             if (isCrit)
             {
-                DisplayTypingMessage($"💥💥 CRITICAL HIT! {enemy.AircraftName} scores devastating hit for {damage} damage!", ConsoleColor.Red, 40);
-                DisplayTypingMessage("🚨 HULL BREACH! Critical systems damaged!", ConsoleColor.Red);
+                DisplayTypingMessage($"[CRITICAL] CRITICAL HIT! {enemy.AircraftName} scores devastating hit for {damage} damage!", ConsoleColor.Red, 40);
+                DisplayTypingMessage("[BREACH] HULL BREACH! Critical systems damaged!", ConsoleColor.Red);
             }
             else
             {
-                DisplayTypingMessage($"💥 ENEMY HIT! {enemy.AircraftName} deals {damage} damage!", ConsoleColor.Red, 30);
+                DisplayTypingMessage($"[DAMAGE] ENEMY HIT! {enemy.AircraftName} deals {damage} damage!", ConsoleColor.Red, 30);
             }
             
             playerHealth -= damage;
             
             // Health status warnings
             if (playerHealth <= 1)
-                DisplayTypingMessage("🆘 CRITICAL CONDITION! Immediate medical attention required!", ConsoleColor.Red, 50);
+                DisplayTypingMessage("[CRITICAL] CRITICAL CONDITION! Immediate medical attention required!", ConsoleColor.Red, 50);
             else if (playerHealth <= 2)
-                DisplayTypingMessage("⚠️ SEVERE DAMAGE! Hull integrity compromised!", ConsoleColor.Yellow);
+                DisplayTypingMessage("[WARNING] SEVERE DAMAGE! Hull integrity compromised!", ConsoleColor.Yellow);
             else if (playerHealth <= 3)
-                DisplayTypingMessage("⚠️ MODERATE DAMAGE! Systems showing stress!", ConsoleColor.Yellow);
+                DisplayTypingMessage("[WARNING] MODERATE DAMAGE! Systems showing stress!", ConsoleColor.Yellow);
             
             if (playerHealth <= 0)
             {
                 currentState = GameState.Defeat;
-                DisplayTypingMessage("💀 AIRCRAFT DESTROYED! PILOT DOWN!", ConsoleColor.Red, 50);
+                DisplayTypingMessage("[DESTROYED] AIRCRAFT DESTROYED! PILOT DOWN!", ConsoleColor.Red, 50);
                 System.Threading.Thread.Sleep(1500); // Give time to read the final message
                 HandleGameOver();
                 return;
@@ -1897,10 +1893,10 @@ class JetFighterGame
         else
         {
             string[] missMessages = {
-                $"✅ {enemy.AircraftName} misses! Shots wide of target!",
-                $"✅ Evasive maneuvers successful! {enemy.AircraftName} attack ineffective!",
-                $"✅ Lucky break! {enemy.AircraftName} weapons malfunction!",
-                $"✅ Defensive systems work! {enemy.AircraftName} can't get a lock!"
+                $"[MISS] {enemy.AircraftName} misses! Shots wide of target!",
+                $"[EVADE] Evasive maneuvers successful! {enemy.AircraftName} attack ineffective!",
+                $"[LUCK] Lucky break! {enemy.AircraftName} weapons malfunction!",
+                $"[DEFENSE] Defensive systems work! {enemy.AircraftName} can't get a lock!"
             };
             DisplayTypingMessage(missMessages[random.Next(missMessages.Length)], ConsoleColor.Green);
         }
@@ -1908,7 +1904,7 @@ class JetFighterGame
 
     private void PerformEvasiveManeuver()
     {
-        DisplayTypingMessage("🌪️ Executing barrel roll maneuver!", ConsoleColor.Green, 40);
+        DisplayTypingMessage("[MANEUVER] Executing barrel roll maneuver!", ConsoleColor.Green, 40);
         
         // Chance to avoid enemy attacks in the next turn
         ConsumeFuel("turn");
@@ -1933,20 +1929,20 @@ class JetFighterGame
             var move = validMoves[random.Next(validMoves.Count)];
             playerX = move.Item1;
             playerY = move.Item2;
-            DisplayTypingMessage("✅ Evasive maneuver successful! New position acquired.", ConsoleColor.Green);
+            DisplayTypingMessage("[SUCCESS] Evasive maneuver successful! New position acquired.", ConsoleColor.Green);
         }
         else
         {
-            DisplayTypingMessage("⚠️ Limited maneuvering space! Maintaining current position.", ConsoleColor.Yellow);
+            DisplayTypingMessage("[WARNING] Limited maneuvering space! Maintaining current position.", ConsoleColor.Yellow);
         }
     }
 
     public void PowerUp()
     {
         PlayerDamage++;
-        DisplayTypingMessage("🚀 POWER UP ACQUIRED!", ConsoleColor.Yellow, 50);
-        DisplayTypingMessage($"⚡ Weapons systems upgraded! Damage multiplier: x{PlayerDamage}", ConsoleColor.Green, 30);
-        DisplayTypingMessage("🔧 All weapon systems now operating at enhanced capacity!", ConsoleColor.Cyan);
+        DisplayTypingMessage("[POWERUP] POWER UP ACQUIRED!", ConsoleColor.Yellow, 50);
+        DisplayTypingMessage($"[UPGRADE] Weapons systems upgraded! Damage multiplier: x{PlayerDamage}", ConsoleColor.Green, 30);
+        DisplayTypingMessage("[UPGRADE] All weapon systems now operating at enhanced capacity!", ConsoleColor.Cyan);
     }
 
     private void ConsumeFuel(string maneuver)
@@ -1985,27 +1981,27 @@ class JetFighterGame
 
     private void HandlePlayerOutOfFuel()
     {
-        DisplayTypingMessage("🚨 WARNING: OUT OF FUEL! EMERGENCY LANDING REQUIRED!", ConsoleColor.Red, 50);
+        DisplayTypingMessage("[EMERGENCY] WARNING: OUT OF FUEL! EMERGENCY LANDING REQUIRED!", ConsoleColor.Red, 50);
         
         // Forced descent
         if (playerAltitude > 0)
         {
             playerAltitude--;
-            DisplayTypingMessage($"⬇️ Altitude dropping! Current altitude: {playerAltitude}", ConsoleColor.Yellow);
+            DisplayTypingMessage($"[DESCENT] Altitude dropping! Current altitude: {playerAltitude}", ConsoleColor.Yellow);
         }
         else
         {
             // Check if player is over a landing zone/base
             if (IsOverLandingZone(playerX, playerY))
             {
-                DisplayTypingMessage("✅ Emergency landing successful!", ConsoleColor.Green);
+                DisplayTypingMessage("[EMERGENCY] Emergency landing successful!", ConsoleColor.Green);
                 Refuel(50); // Partial refuel after emergency landing
             }
             else
             {
                 // Crashed
                 playerHealth -= 2;
-                DisplayTypingMessage("💥 CRASH! Emergency landing on hostile terrain!", ConsoleColor.Red);
+                DisplayTypingMessage("[CRASH] CRASH! Emergency landing on hostile terrain!", ConsoleColor.Red);
                 
                 if (playerHealth <= 0)
                 {
@@ -2029,7 +2025,7 @@ class JetFighterGame
         Fuel += amount;
         if (Fuel > MaxFuel)
             Fuel = MaxFuel;
-        DisplayTypingMessage($"⛽ Refueled! Current fuel: {Fuel}/{MaxFuel}", ConsoleColor.Green);
+        DisplayTypingMessage($"[FUEL] Refueled! Current fuel: {Fuel}/{MaxFuel}", ConsoleColor.Green);
     }
 
     public void ProcessPlayerAction(string action)
@@ -2059,11 +2055,11 @@ class JetFighterGame
         // Check if player is on an airbase
         if (basePositions.Contains((playerX, playerY)))
         {
-            DisplayTypingMessage("🏭 Airbase refueling sequence initiated...", ConsoleColor.Cyan);
+            DisplayTypingMessage("[REFUEL] Airbase refueling sequence initiated...", ConsoleColor.Cyan);
             System.Threading.Thread.Sleep(1000);
-            DisplayTypingMessage("⛽ Fuel pumps engaged - full tank refuel in progress...", ConsoleColor.Yellow);
+            DisplayTypingMessage("[REFUEL] Fuel pumps engaged - full tank refuel in progress...", ConsoleColor.Yellow);
             Refuel(MaxFuel); // Full refuel
-            DisplayTypingMessage("✅ Refueling complete! All systems ready for combat.", ConsoleColor.Green);
+            DisplayTypingMessage("[REFUEL] Refueling complete! All systems ready for combat.", ConsoleColor.Green);
             return;
         }
         
@@ -2077,19 +2073,19 @@ class JetFighterGame
                 
                 if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize && grid[nx, ny] == 'T')
                 {
-                    DisplayTypingMessage("✈️ Mid-air refueling tanker detected!", ConsoleColor.Cyan);
-                    DisplayTypingMessage("🔗 Establishing fuel line connection...", ConsoleColor.Yellow);
+                    DisplayTypingMessage("[TANKER] Mid-air refueling tanker detected!", ConsoleColor.Cyan);
+                    DisplayTypingMessage("[CONNECT] Establishing fuel line connection...", ConsoleColor.Yellow);
                     System.Threading.Thread.Sleep(1500);
-                    DisplayTypingMessage("⛽ Mid-air refueling in progress...", ConsoleColor.Yellow);
+                    DisplayTypingMessage("[REFUEL] Mid-air refueling in progress...", ConsoleColor.Yellow);
                     Refuel(MaxFuel / 2); // Half tank from mid-air refueling
-                    DisplayTypingMessage("✅ Mid-air refueling complete! Disconnecting fuel line.", ConsoleColor.Green);
+                    DisplayTypingMessage("[REFUEL] Mid-air refueling complete! Disconnecting fuel line.", ConsoleColor.Green);
                     return;
                 }
             }
         }
         
-        DisplayTypingMessage("❌ No refueling sources detected in area!", ConsoleColor.Red);
-        DisplayTypingMessage("🔍 Search for airbase (B) or tanker aircraft (T) nearby.", ConsoleColor.Yellow);
+        DisplayTypingMessage("[ERROR] No refueling sources detected in area!", ConsoleColor.Red);
+        DisplayTypingMessage("[SEARCH] Search for airbase (B) or tanker aircraft (T) nearby.", ConsoleColor.Yellow);
     }
 
     private void ToggleAfterburner()
@@ -2097,13 +2093,13 @@ class JetFighterGame
         afterburnerEnabled = !afterburnerEnabled;
         if (afterburnerEnabled)
         {
-            DisplayTypingMessage("🔥 AFTERBURNER ENGAGED! Maximum thrust activated!", ConsoleColor.Red, 40);
-            DisplayTypingMessage("⚠️ WARNING: Increased fuel consumption rate!", ConsoleColor.Yellow);
+            DisplayTypingMessage("[AFTERBURNER] AFTERBURNER ENGAGED! Maximum thrust activated!", ConsoleColor.Red, 40);
+            DisplayTypingMessage("[WARNING] WARNING: Increased fuel consumption rate!", ConsoleColor.Yellow);
         }
         else
         {
-            DisplayTypingMessage("🔥 Afterburner disengaged. Normal cruise thrust restored.", ConsoleColor.Green);
-            DisplayTypingMessage("✅ Fuel consumption returned to normal levels.", ConsoleColor.White);
+            DisplayTypingMessage("[AFTERBURNER] Afterburner disengaged. Normal cruise thrust restored.", ConsoleColor.Green);
+            DisplayTypingMessage("[SYSTEM] Fuel consumption returned to normal levels.", ConsoleColor.White);
         }
     }
 
@@ -2111,8 +2107,8 @@ class JetFighterGame
     {
         try
         {
-            DisplayTypingMessage("💾 Initiating save sequence...", ConsoleColor.Cyan);
-            
+            DisplayTypingMessage("[SAVE] Initiating save sequence...", ConsoleColor.Cyan);
+
             var saveData = new Dictionary<string, object>
             {
                 { "playerX", playerX },
@@ -2131,12 +2127,12 @@ class JetFighterGame
             string savePath = "save.json";
             File.WriteAllText(savePath, json);
             
-            DisplayTypingMessage("✅ Game saved successfully to flight recorder!", ConsoleColor.Green);
-            DisplayTypingMessage($"📁 Save file: {savePath}", ConsoleColor.White);
+            DisplayTypingMessage("[SAVE] Game saved successfully to flight recorder!", ConsoleColor.Green);
+            DisplayTypingMessage($"[SAVE] Save file: {savePath}", ConsoleColor.White);
         }
         catch (Exception ex)
         {
-            DisplayTypingMessage($"❌ Save failed! Error: {ex.Message}", ConsoleColor.Red);
+            DisplayTypingMessage($"[ERROR] Save failed! Error: {ex.Message}", ConsoleColor.Red);
         }
         
         WaitForInput();
@@ -2147,15 +2143,15 @@ class JetFighterGame
         string savePath = "save.json";
         if (!File.Exists(savePath))
         {
-            DisplayTypingMessage("❌ No saved mission found in flight recorder!", ConsoleColor.Red);
+            DisplayTypingMessage("[ERROR] No saved mission found in flight recorder!", ConsoleColor.Red);
             WaitForInput();
             return false;
         }
 
         try
         {
-            DisplayTypingMessage("📁 Loading saved mission from flight recorder...", ConsoleColor.Cyan);
-            
+            DisplayTypingMessage("[LOAD] Loading saved mission from flight recorder...", ConsoleColor.Cyan);
+
             string json = File.ReadAllText(savePath);
             var saveData = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
 
@@ -2172,20 +2168,20 @@ class JetFighterGame
                 PlayerDamage = saveData["playerDamage"].GetInt32();
                 currentWeather = (Weather)saveData["currentWeather"].GetInt32();
                 
-                DisplayTypingMessage("✅ Mission data loaded successfully!", ConsoleColor.Green);
-                DisplayTypingMessage($"📊 Health: {playerHealth} | Score: {score} | Fuel: {Fuel}", ConsoleColor.White);
-                DisplayTypingMessage("🎯 Resuming combat operations...", ConsoleColor.Yellow);
+                DisplayTypingMessage("[LOAD] Mission data loaded successfully!", ConsoleColor.Green);
+                DisplayTypingMessage($"[STATUS] Health: {playerHealth} | Score: {score} | Fuel: {Fuel}", ConsoleColor.White);
+                DisplayTypingMessage("[RESUME] Resuming combat operations...", ConsoleColor.Yellow);
             }
             else
             {
-                DisplayTypingMessage("❌ Corrupted save data! Unable to load mission.", ConsoleColor.Red);
+                DisplayTypingMessage("[ERROR] Corrupted save data! Unable to load mission.", ConsoleColor.Red);
                 WaitForInput();
                 return false;
             }
         }
         catch (Exception ex)
         {
-            DisplayTypingMessage($"❌ Load failed! Error: {ex.Message}", ConsoleColor.Red);
+            DisplayTypingMessage($"[ERROR] Load failed! Error: {ex.Message}", ConsoleColor.Red);
             WaitForInput();
             return false;
         }
