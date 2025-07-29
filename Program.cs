@@ -743,7 +743,18 @@ class JetFighterGame
     private enum GameState { Playing, Victory, Defeat }
 
     private GameState currentState = GameState.Playing;
+    private bool gameOverHandled = false; // Track if game over has been properly handled
     public bool IsGameActive => currentState == GameState.Playing;
+    
+    // Method to check if game ended and handle cleanup if needed
+    public void EnsureGameEndHandled()
+    {
+        if (!IsGameActive && !gameOverHandled)
+        {
+            // If game is not active but we haven't properly handled game over, do it now
+            HandleGameOver();
+        }
+    }
     private const int gridSize = 20;
     private char[,] grid;
     private int playerX, playerY;
@@ -1054,13 +1065,66 @@ class JetFighterGame
 
     private void EndGame(string message)
     {
-        DisplayGrid();
-        Console.WriteLine(message);
-        Console.WriteLine("\nGame Over. Combat Results:");
-        Console.WriteLine($"Final Health: {playerHealth}");
-        Console.WriteLine($"Final Score: {score}");
-        Console.WriteLine("Press any key to exit...");
-        Console.ReadKey();
+        try
+        {
+            // Clear any previous output and ensure clean display
+            Console.Clear();
+            
+            // Display final grid state
+            Console.WriteLine("═══════════════════════════════════════════════════════════════════");
+            Console.WriteLine("                          FINAL MISSION STATUS                       ");
+            Console.WriteLine("═══════════════════════════════════════════════════════════════════");
+            Console.WriteLine();
+            
+            DisplayGrid();
+            
+            Console.WriteLine();
+            Console.WriteLine("═══════════════════════════════════════════════════════════════════");
+            Console.ForegroundColor = currentState == GameState.Victory ? ConsoleColor.Green : ConsoleColor.Red;
+            Console.WriteLine($"                          {message.ToUpper()}                          ");
+            Console.ResetColor();
+            Console.WriteLine("═══════════════════════════════════════════════════════════════════");
+            Console.WriteLine();
+            
+            Console.WriteLine("📊 FINAL COMBAT STATISTICS:");
+            Console.WriteLine($"   ❤️  Final Health: {playerHealth}/5");
+            Console.WriteLine($"   🏆 Final Score: {score}");
+            Console.WriteLine($"   ✈️  Final Altitude: {playerAltitude}");
+            Console.WriteLine($"   ⛽ Remaining Fuel: {Fuel}/{MaxFuel}");
+            Console.WriteLine($"   🎯 Completed Missions: {completedMissions.Count}");
+            Console.WriteLine($"   ⚔️  Enemies Remaining: {enemyJets.Count}");
+            
+            if (completedMissions.Count > 0)
+            {
+                Console.WriteLine();
+                Console.WriteLine("🏅 COMPLETED MISSIONS:");
+                foreach (var mission in completedMissions)
+                {
+                    Console.WriteLine($"   ✅ {mission.Objective} (+{mission.RewardPoints} pts)");
+                }
+            }
+            
+            Console.WriteLine();
+            Console.WriteLine("═══════════════════════════════════════════════════════════════════");
+            Console.WriteLine("                    THANK YOU FOR PLAYING!                         ");
+            Console.WriteLine("═══════════════════════════════════════════════════════════════════");
+            Console.WriteLine();
+            Console.WriteLine("Press any key to exit...");
+            
+            // Ensure we wait for user input before exiting
+            Console.ReadKey(true);
+        }
+        catch (Exception ex)
+        {
+            // Emergency fallback in case of display issues
+            Console.WriteLine("\n" + message);
+            Console.WriteLine($"Final Score: {score}");
+            Console.WriteLine($"Final Health: {playerHealth}");
+            Console.WriteLine($"Game ended due to display error: {ex.Message}");
+            Console.WriteLine("Press any key to exit...");
+            Console.ReadKey(true);
+        }
+        
         Environment.Exit(0);
     }
 
@@ -1143,6 +1207,9 @@ class JetFighterGame
             {
                 currentState = GameState.Victory;
                 DisplayTypingMessage("🎉 ALL ENEMIES NEUTRALIZED! MISSION ACCOMPLISHED!", ConsoleColor.Green, 50);
+                System.Threading.Thread.Sleep(1500); // Give time to read the victory message
+                HandleGameOver();
+                return;
             }
         }
         
@@ -1352,6 +1419,9 @@ class JetFighterGame
 
     private void HandleGameOver()
     {
+        if (gameOverHandled) return; // Prevent double-handling
+        
+        gameOverHandled = true;
         string message = currentState switch
         {
             GameState.Victory => "Victory! All enemy jets destroyed.",
@@ -1819,6 +1889,9 @@ class JetFighterGame
             {
                 currentState = GameState.Defeat;
                 DisplayTypingMessage("💀 AIRCRAFT DESTROYED! PILOT DOWN!", ConsoleColor.Red, 50);
+                System.Threading.Thread.Sleep(1500); // Give time to read the final message
+                HandleGameOver();
+                return;
             }
         }
         else
@@ -1938,6 +2011,7 @@ class JetFighterGame
                 {
                     currentState = GameState.Defeat;
                     HandleGameOver();
+                    return;
                 }
             }
         }
@@ -2162,6 +2236,13 @@ class Program
                 game.CheckMissionProgress();
                 game.DisplayGrid();
             }
+        }
+        
+        // Ensure game over is handled if we exit the loop but haven't called HandleGameOver
+        if (!game.IsGameActive)
+        {
+            // Safety net to ensure proper game over handling
+            game.EnsureGameEndHandled();
         }
     }
 }
