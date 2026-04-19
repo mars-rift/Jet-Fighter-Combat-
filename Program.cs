@@ -23,6 +23,9 @@ class Mission
     
     public void Complete()
     {
+        if (IsComplete)
+            return;
+
         IsComplete = true;
         Console.WriteLine($"Mission complete: {Objective}");
         Console.WriteLine($"Reward: {RewardPoints} points");
@@ -92,39 +95,59 @@ abstract class EnemyJet
         }
     }
 
-    protected void ManageAltitude(int playerAltitude)
+    protected void ManageAltitude(int playerAltitude, Weather weather)
     {
-        // AI altitude management based on combat situation and aircraft type
-        if (CurrentState == EnemyState.Chasing)
+        int targetAltitude = PreferredAltitude;
+
+        if (CurrentState == EnemyState.Chasing || CurrentState == EnemyState.Flanking || CurrentState == EnemyState.Diving)
         {
-            // Try to match or gain altitude advantage over player
-            if (playerAltitude > Altitude && Altitude < 3)
+            if (weather == Weather.Storm)
             {
-                Altitude++;
-                ConsumeFuel("climb");
+                // Storms make extreme high-altitude maneuvers risky; favor medium altitude when engaging.
+                targetAltitude = Math.Min(2, Math.Max(1, playerAltitude));
+            }
+            else if (weather == Weather.Cloudy)
+            {
+                // Clouds reduce visibility, so close the gap and engage from a stable altitude.
+                targetAltitude = Math.Max(1, Math.Min(3, playerAltitude));
+            }
+            else
+            {
+                // Clear weather allows altitude advantage seeking.
+                targetAltitude = Math.Min(3, Math.Max(playerAltitude, PreferredAltitude));
             }
         }
         else if (CurrentState == EnemyState.Retreating)
         {
-            // Climb to escape if possible
-            if (Altitude < 3)
+            if (weather == Weather.Storm)
             {
-                Altitude++;
-                ConsumeFuel("climb");
+                targetAltitude = Math.Max(1, Altitude - 1);
+            }
+            else
+            {
+                targetAltitude = Math.Min(3, Altitude + 1);
             }
         }
         else if (CurrentState == EnemyState.Patrolling)
         {
-            // Return to preferred altitude
-            if (Altitude < PreferredAltitude && Altitude < 3)
+            if (weather == Weather.Storm)
             {
-                Altitude++;
-                ConsumeFuel("climb");
+                targetAltitude = Math.Min(2, PreferredAltitude);
             }
-            else if (Altitude > PreferredAltitude && Altitude > 0)
+            else
             {
-                Altitude--;
+                targetAltitude = PreferredAltitude;
             }
+        }
+
+        if (Altitude < targetAltitude && Altitude < 3)
+        {
+            Altitude++;
+            ConsumeFuel("climb");
+        }
+        else if (Altitude > targetAltitude && Altitude > 0)
+        {
+            Altitude--;
         }
     }
 
@@ -202,38 +225,46 @@ class F16Falcon : EnemyJet
     public override void Move(int playerX, int playerY, char[,] grid)
     {
         bool playerDetected = CanDetectPlayer(playerX, playerY, game.PlayerAltitude);
-        
+        double distance = Math.Sqrt(Math.Pow(X - playerX, 2) + Math.Pow(Y - playerY, 2));
+
         if (playerDetected)
         {
             lastPlayerX = playerX;
             lastPlayerY = playerY;
             turnsWithoutContact = 0;
-            
-            double distance = Math.Sqrt(Math.Pow(X - playerX, 2) + Math.Pow(Y - playerY, 2));
-            
-            if (Health < MaxHealth * 0.3)
+
+            if (Health < MaxHealth * 0.35)
             {
                 UpdateState(EnemyState.Retreating);
             }
-            else if (distance <= 3)
+            else if (distance <= 2)
             {
                 UpdateState(EnemyState.Flanking);
             }
-            else
+            else if (distance <= 6)
             {
                 UpdateState(EnemyState.Chasing);
+            }
+            else
+            {
+                UpdateState(EnemyState.Flanking);
             }
         }
         else
         {
             turnsWithoutContact++;
-            if (turnsWithoutContact > 5)
+            if (turnsWithoutContact > 4)
             {
                 UpdateState(EnemyState.Patrolling);
             }
         }
 
-        ManageAltitude(game.PlayerAltitude);
+        if (CurrentState == EnemyState.Flanking && distance > 5)
+            UpdateState(EnemyState.Chasing);
+        else if (CurrentState == EnemyState.Chasing && distance <= 2)
+            UpdateState(EnemyState.Flanking);
+
+        ManageAltitude(game.PlayerAltitude, game.CurrentWeather);
         ExecuteManeuver(playerX, playerY, grid);
         ConsumeFuel("regular");
     }
@@ -370,27 +401,29 @@ class Su27Flanker : EnemyJet
     public override void Move(int playerX, int playerY, char[,] grid)
     {
         bool playerDetected = CanDetectPlayer(playerX, playerY, game.PlayerAltitude);
-        
+        double distance = Math.Sqrt(Math.Pow(X - playerX, 2) + Math.Pow(Y - playerY, 2));
+
         if (playerDetected)
         {
-            double distance = Math.Sqrt(Math.Pow(X - playerX, 2) + Math.Pow(Y - playerY, 2));
-            
             if (Health < MaxHealth * 0.4)
             {
                 UpdateState(EnemyState.Retreating);
                 aggressionLevel = Math.Max(1, aggressionLevel - 1);
             }
-            else if (distance > 8)
+            else if (distance <= 4)
             {
-                UpdateState(EnemyState.Chasing);
+                if (aggressionLevel > 6)
+                    UpdateState(EnemyState.Diving); // Aggressive diving attack
+                else
+                    UpdateState(EnemyState.Flanking);
             }
-            else if (aggressionLevel > 6)
+            else if (distance <= 7)
             {
-                UpdateState(EnemyState.Diving); // Aggressive diving attack
+                UpdateState(EnemyState.Flanking);
             }
             else
             {
-                UpdateState(EnemyState.Flanking);
+                UpdateState(EnemyState.Chasing);
             }
         }
         else
@@ -398,7 +431,12 @@ class Su27Flanker : EnemyJet
             UpdateState(EnemyState.Patrolling);
         }
 
-        ManageAltitude(game.PlayerAltitude);
+        if (CurrentState == EnemyState.Flanking && distance > 7)
+            UpdateState(EnemyState.Chasing);
+        else if (CurrentState == EnemyState.Diving && distance > 5)
+            UpdateState(EnemyState.Chasing);
+
+        ManageAltitude(game.PlayerAltitude, game.CurrentWeather);
         ExecuteAdvancedManeuver(playerX, playerY, grid);
         ConsumeFuel("regular");
     }
@@ -553,23 +591,30 @@ class F22Raptor : EnemyJet
         ManageStealthMode();
         
         bool playerDetected = CanDetectPlayer(playerX, playerY, game.PlayerAltitude);
+        double distance = Math.Sqrt(Math.Pow(X - playerX, 2) + Math.Pow(Y - playerY, 2));
         
         if (playerDetected)
         {
-            double distance = Math.Sqrt(Math.Pow(X - playerX, 2) + Math.Pow(Y - playerY, 2));
-            
             if (Health < MaxHealth * 0.5)
             {
                 UpdateState(EnemyState.Retreating);
                 stealthMode = true; // Activate stealth when retreating
             }
-            else if (distance <= 4 && stealthMode)
+            else if (distance <= 3 && stealthMode)
             {
                 UpdateState(EnemyState.Diving); // Stealth attack
             }
-            else
+            else if (distance <= 4)
+            {
+                UpdateState(EnemyState.Flanking);
+            }
+            else if (distance <= 7)
             {
                 UpdateState(EnemyState.Chasing);
+            }
+            else
+            {
+                UpdateState(EnemyState.Patrolling);
             }
         }
         else
@@ -577,7 +622,12 @@ class F22Raptor : EnemyJet
             UpdateState(EnemyState.Patrolling);
         }
 
-        ManageAltitude(game.PlayerAltitude);
+        if (CurrentState == EnemyState.Chasing && distance <= 4)
+            UpdateState(EnemyState.Flanking);
+        else if (CurrentState == EnemyState.Diving && distance > 4)
+            UpdateState(EnemyState.Chasing);
+
+        ManageAltitude(game.PlayerAltitude, game.CurrentWeather);
         ExecuteStealthManeuver(playerX, playerY, grid);
         ConsumeFuel("regular");
     }
@@ -759,7 +809,8 @@ class JetFighterGame
     private char[,] grid;
     private int playerX, playerY;
     private char playerJet = 'P';
-    private int playerHealth = 5;
+    private int maxPlayerHealth = 10;
+    private int playerHealth = 10;
     private int score = 0;
     private List<Mission> activeMissions = new List<Mission>();
     private List<Mission> completedMissions = new List<Mission>();
@@ -775,6 +826,7 @@ class JetFighterGame
     private List<EnemyJet> enemyJets;
     private Random random;
     private Weather currentWeather = Weather.Clear;
+    public Weather CurrentWeather => currentWeather;
     private int weatherTurns = 0; // Track how long current weather has persisted
     private double detectionRangeModifier = 1.0;
     private double accuracyModifier = 1.0;
@@ -1087,7 +1139,7 @@ class JetFighterGame
             Console.WriteLine();
             
             Console.WriteLine("[STATS] FINAL COMBAT STATISTICS:");
-            Console.WriteLine($"   [HP]  Final Health: {playerHealth}/5");
+            Console.WriteLine($"   [HP]  Final Health: {playerHealth}/{maxPlayerHealth}");
             Console.WriteLine($"   [PTS] Final Score: {score}");
             Console.WriteLine($"   [ALT] Final Altitude: {playerAltitude}");
             Console.WriteLine($"   [FUEL] Remaining Fuel: {Fuel}/{MaxFuel}");
@@ -1154,6 +1206,7 @@ class JetFighterGame
         DisplayCombatOptions(enemy);
         
         string? action = Console.ReadLine();
+        bool evaded = false;
         switch (action?.ToLower())
         {
             case "1": // Fire missile
@@ -1172,7 +1225,7 @@ class JetFighterGame
                 break;
             case "3": // Evasive maneuver
                 DisplayTypingMessage("[EVADE] Executing evasive maneuvers!", ConsoleColor.Green, 40);
-                PerformEvasiveManeuver();
+                evaded = PerformEvasiveManeuver();
                 break;
             default:
                 DisplayTypingMessage("[MISS] Combat opportunity missed! No action taken.", ConsoleColor.DarkRed);
@@ -1182,9 +1235,16 @@ class JetFighterGame
         // Enemy counterattack with realistic factors
         if (enemy.Health > 0)
         {
-            System.Threading.Thread.Sleep(500);
-            DisplayTypingMessage("[WARNING] Enemy counterattack incoming!", ConsoleColor.Red);
-            EnemyAttack(enemy);
+            if (evaded)
+            {
+                DisplayTypingMessage("[EVADE] Enemy attack avoided! Your maneuver paid off.", ConsoleColor.Green);
+            }
+            else
+            {
+                System.Threading.Thread.Sleep(500);
+                DisplayTypingMessage("[WARNING] Enemy counterattack incoming!", ConsoleColor.Red);
+                EnemyAttack(enemy);
+            }
         }
         else
         {
@@ -1226,7 +1286,11 @@ class JetFighterGame
             // More balanced combat ranges allowing for tactical movement
             bool shouldEngage = false;
             
-            if (distance <= 1) // Point blank range - very high chance but not automatic
+            if (distance == 0)
+            {
+                shouldEngage = true;
+            }
+            else if (distance <= 1) // Point blank range - very high chance but not automatic
             {
                 shouldEngage = random.NextDouble() < 0.85;
             }
@@ -1262,29 +1326,54 @@ class JetFighterGame
 
         grid[playerX, playerY] = '.';
 
-        // Save original position in case we need to roll back
         int originalX = playerX;
         int originalY = playerY;
+        int moveCount = afterburnerEnabled ? 2 : 1;
+
+        int dx = 0;
+        int dy = 0;
 
         switch (direction)
         {
-            case "w": if (playerX > 0) playerX--; break;
-            case "s": if (playerX < gridSize - 1) playerX++; break;
-            case "a": if (playerY > 0) playerY--; break;
-            case "d": if (playerY < gridSize - 1) playerY++; break;
-            case "q": if (playerX > 0 && playerY > 0) { playerX--; playerY--; } break;
-            case "e": if (playerX > 0 && playerY < gridSize - 1) { playerX--; playerY++; } break;
-            case "z": if (playerX < gridSize - 1 && playerY > 0) { playerX++; playerY--; } break;
-            case "c": if (playerX < gridSize - 1 && playerY < gridSize - 1) { playerX++; playerY++; } break;
+            case "w": dx = -1; break;
+            case "s": dx = 1; break;
+            case "a": dy = -1; break;
+            case "d": dy = 1; break;
+            case "q": dx = -1; dy = -1; break;
+            case "e": dx = -1; dy = 1; break;
+            case "z": dx = 1; dy = -1; break;
+            case "c": dx = 1; dy = 1; break;
             default:
                 Console.WriteLine("Invalid move. Use w, a, s, d, q, e, z, or c.");
+                grid[originalX, originalY] = playerJet;
                 return; // Don't consume fuel for invalid moves
         }
 
-        // Only consume fuel if the player actually moved
-        if (originalX != playerX || originalY != playerY)
+        bool moved = false;
+        for (int step = 0; step < moveCount; step++)
         {
-            ConsumeFuel("regular");
+            int newX = Math.Max(0, Math.Min(gridSize - 1, playerX + dx));
+            int newY = Math.Max(0, Math.Min(gridSize - 1, playerY + dy));
+
+            if (newX == playerX && newY == playerY)
+                break;
+
+            playerX = newX;
+            playerY = newY;
+            moved = true;
+
+            ConsumeFuel(afterburnerEnabled ? "afterburner" : "regular");
+            if (Fuel <= 0)
+            {
+                afterburnerEnabled = false;
+                break;
+            }
+        }
+
+        if (!moved)
+        {
+            grid[originalX, originalY] = playerJet;
+            return;
         }
 
         // Check for enemy encounters at various combat ranges
@@ -1392,7 +1481,11 @@ class JetFighterGame
             // Enemies can initiate combat based on their state and distance - more tactical
             bool shouldInitiate = false;
             
-            if (distance <= 1 && enemy.CurrentState == EnemyState.Chasing) // Very close aggressive combat
+            if (distance == 0)
+            {
+                shouldInitiate = true;
+            }
+            else if (distance <= 1 && enemy.CurrentState == EnemyState.Chasing) // Very close aggressive combat
             {
                 shouldInitiate = random.NextDouble() < 0.6; // Reduced from 0.9
             }
@@ -1445,12 +1538,22 @@ class JetFighterGame
     {
         int detectionRange = 8; // Base detection range
 
-        // F-22 Raptor in stealth mode is harder to detect
         if (enemy is F22Raptor raptor && raptor.IsInStealthMode())
-            detectionRange = 3;
-        
-        // Higher altitude increases detection range
-        detectionRange += playerAltitude;
+        {
+            detectionRange = Math.Max(2, detectionRange - 4);
+        }
+
+        // Higher altitude gives a small radar advantage
+        detectionRange += playerAltitude / 2;
+
+        // Altitude difference reduces detection if the enemy is above or below the player
+        int altitudeDifference = Math.Abs(enemy.Altitude - playerAltitude);
+        if (altitudeDifference > 1)
+            detectionRange = Math.Max(1, detectionRange - 2);
+
+        // Faster or more experienced enemies are slightly harder to spot
+        if (enemy.CombatExperience >= 4)
+            detectionRange = Math.Max(1, detectionRange - 1);
 
         // Calculate distance
         double distance = Math.Sqrt(Math.Pow(enemy.X - playerX, 2) + Math.Pow(enemy.Y - playerY, 2));
@@ -1730,6 +1833,9 @@ class JetFighterGame
 
     private void CompleteActiveMission(Mission mission)
     {
+        if (mission.IsComplete)
+            return;
+
         mission.Complete(); // Mark mission as complete
         activeMissions.Remove(mission);
         completedMissions.Add(mission);
@@ -1875,7 +1981,7 @@ class JetFighterGame
             
             // Health status warnings
             if (playerHealth <= 1)
-                DisplayTypingMessage("[CRITICAL] CRITICAL CONDITION! Immediate medical attention required!", ConsoleColor.Red, 50);
+                DisplayTypingMessage("[CRITICAL] CRITICAL DAMAGE! Aircraft systems critically damaged!", ConsoleColor.Red, 50);
             else if (playerHealth <= 2)
                 DisplayTypingMessage("[WARNING] SEVERE DAMAGE! Hull integrity compromised!", ConsoleColor.Yellow);
             else if (playerHealth <= 3)
@@ -1884,7 +1990,7 @@ class JetFighterGame
             if (playerHealth <= 0)
             {
                 currentState = GameState.Defeat;
-                DisplayTypingMessage("[DESTROYED] AIRCRAFT DESTROYED! PILOT DOWN!", ConsoleColor.Red, 50);
+                DisplayTypingMessage("[DESTROYED] AIRCRAFT DESTROYED! Pilot must eject from the jet!", ConsoleColor.Red, 50);
                 System.Threading.Thread.Sleep(1500); // Give time to read the final message
                 HandleGameOver();
                 return;
@@ -1902,7 +2008,7 @@ class JetFighterGame
         }
     }
 
-    private void PerformEvasiveManeuver()
+    private bool PerformEvasiveManeuver()
     {
         DisplayTypingMessage("[MANEUVER] Executing barrel roll maneuver!", ConsoleColor.Green, 40);
         
@@ -1924,17 +2030,28 @@ class JetFighterGame
             }
         }
         
-        if (validMoves.Count > 0)
+        bool success = random.NextDouble() < 0.75;
+        if (validMoves.Count > 0 && success)
         {
             var move = validMoves[random.Next(validMoves.Count)];
             playerX = move.Item1;
             playerY = move.Item2;
             DisplayTypingMessage("[SUCCESS] Evasive maneuver successful! New position acquired.", ConsoleColor.Green);
+            return true;
+        }
+        
+        if (validMoves.Count > 0)
+        {
+            DisplayTypingMessage("[WARNING] Evasive maneuver partially succeeded, but enemy remains in range.", ConsoleColor.Yellow);
+            var move = validMoves[random.Next(validMoves.Count)];
+            playerX = move.Item1;
+            playerY = move.Item2;
         }
         else
         {
             DisplayTypingMessage("[WARNING] Limited maneuvering space! Maintaining current position.", ConsoleColor.Yellow);
         }
+        return false;
     }
 
     public void PowerUp()
@@ -1981,6 +2098,7 @@ class JetFighterGame
 
     private void HandlePlayerOutOfFuel()
     {
+        afterburnerEnabled = false;
         DisplayTypingMessage("[EMERGENCY] WARNING: OUT OF FUEL! EMERGENCY LANDING REQUIRED!", ConsoleColor.Red, 50);
         
         // Forced descent
@@ -2090,11 +2208,17 @@ class JetFighterGame
 
     private void ToggleAfterburner()
     {
+        if (!afterburnerEnabled && Fuel <= 5)
+        {
+            DisplayTypingMessage("[WARNING] Not enough fuel to sustain afterburner!", ConsoleColor.Yellow);
+            return;
+        }
+
         afterburnerEnabled = !afterburnerEnabled;
         if (afterburnerEnabled)
         {
             DisplayTypingMessage("[AFTERBURNER] AFTERBURNER ENGAGED! Maximum thrust activated!", ConsoleColor.Red, 40);
-            DisplayTypingMessage("[WARNING] WARNING: Increased fuel consumption rate!", ConsoleColor.Yellow);
+            DisplayTypingMessage("[WARNING] WARNING: Increased fuel consumption rate and faster movement!", ConsoleColor.Yellow);
         }
         else
         {
