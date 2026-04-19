@@ -4,6 +4,8 @@ A terminal-based jet combat simulation game where you pilot a fighter jet agains
 
 ![Jet Combat](https://img.shields.io/badge/Jet-Combat-blue) ![C# Console](https://img.shields.io/badge/C%23-Console-brightgreen)
 
+![Screenshot](screenshot.png)
+
 ## Description
 
 Jet Fighter Combat is a strategic air combat simulation game built with C#. Navigate your fighter through a dangerous airspace, engage enemy jets in tactical combat, and manage critical resources like fuel and ammunition while battling various types of enemy aircraft.
