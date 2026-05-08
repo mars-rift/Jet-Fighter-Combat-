@@ -13,14 +13,29 @@ class Mission
     public string Objective { get; }
     public bool IsComplete { get; private set; }
     public int RewardPoints { get; }
-    
+
+    // ---- Assignment snapshot ----
+    // Captures the relevant world state at the moment the mission is assigned.
+    // Mission completion is then evaluated as a DELTA against this snapshot, so a
+    // mission cannot be "completed" by state that already existed when it was given.
+    public int AssignedTurn { get; set; }
+    public int KillsAtAssignment { get; set; }
+    public int StealthKillsAtAssignment { get; set; }
+    public int Alt3KillsAtAssignment { get; set; }
+    public int MidAirRefuelsAtAssignment { get; set; }
+    public int StormTurnsAtAssignment { get; set; }   // running counter of turns spent in storm
+    public bool StartedAtMaxAltitude { get; set; }    // for "Reach maximum altitude"
+    public bool StartedAtBase { get; set; }           // for "Visit any base"
+    public bool BaseVisitedSinceAssignment { get; set; }
+    public bool MaxAltitudeReachedSinceAssignment { get; set; }
+
     public Mission(string objective, int rewardPoints)
     {
         Objective = objective;
         RewardPoints = rewardPoints;
         IsComplete = false;
     }
-    
+
     public void Complete()
     {
         if (IsComplete)
@@ -815,6 +830,19 @@ class JetFighterGame
     private List<Mission> activeMissions = new List<Mission>();
     private List<Mission> completedMissions = new List<Mission>();
     private int missionCounter = 0;
+
+    // ---- Mission-progress counters ----
+    // These are monotonically increasing tallies of player-attributable events. Mission
+    // completion compares the current value to a snapshot taken when the mission was
+    // assigned, so missions can only be cleared by NEW work the player performs after
+    // accepting them.
+    private int turnCounter = 0;             // total full game turns elapsed
+    private int totalEnemyKills = 0;         // enemies destroyed by the player
+    private int stealthKills = 0;            // F-22 Raptor kills
+    private int alt3Kills = 0;               // kills scored at altitude 3
+    private int midAirRefuels = 0;           // successful tanker refuels via 'r'
+    private int stormTurnsLifetime = 0;      // running total of turns spent in storms
+
     private Queue<string> messageQueue = new Queue<string>(); // Message queue for delayed display
 
     private int _playerDamage = 1;
@@ -833,6 +861,17 @@ class JetFighterGame
     private int playerAltitude = 1;
     private int missileAmmo = 10;
     private int gunAmmo = 500;
+    private int countermeasures = 4;       // Chaff/flare bundles available
+    private int maxCountermeasures = 4;
+
+    // Combat flow state -- ensures correct battle order and prevents double-resolution
+    private int playerDx = -1;             // Last movement direction (player "facing")
+    private int playerDy = 0;
+    private bool enemyCombatResolvedThisTurn = false; // True if an enemy already fired at the player this turn
+    private bool playerEvadingNextTurn = false;       // Carry-over evasion benefit from a successful evasive maneuver
+
+    // Combat-encounter control
+    private enum EngagementAspect { HeadOn, Beam, Rear }
 
     public double Heading { get; set; } // Direction in degrees (0-359)
     public double Velocity { get; set; } // Current speed
@@ -1180,12 +1219,27 @@ class JetFighterGame
         Environment.Exit(0);
     }
 
-    private void ProcessCombat(EnemyJet enemy)
+    /// <summary>
+    /// Resolves a 1-v-1 air-to-air engagement between the player and a single enemy.
+    /// Battle order is determined by INITIATIVE:
+    ///   1. SITREP (range / aspect / lock probability) is presented.
+    ///   2. Player chooses an action (fire missile / guns / evade / countermeasures).
+    ///   3. If the enemy has initiative, ENEMY FIRES FIRST (modified by player's defensive choice).
+    ///      Otherwise the player's shot resolves first.
+    ///   4. The other party returns fire (if still alive and not already resolved).
+    /// This ordering prevents the previous bug where the enemy always counterattacked
+    /// AFTER the player, even when the enemy was the one who ambushed the player.
+    /// </summary>
+    private void ProcessCombat(EnemyJet enemy, bool enemyInitiated = false)
     {
         Console.Clear();
-        DisplayTypingMessage($"[ALERT] ENEMY CONTACT! {enemy.AircraftName} detected at {enemy.X},{enemy.Y}!", ConsoleColor.Red);
-        
+        if (enemyInitiated)
+            DisplayTypingMessage($"[BREAK] {enemy.AircraftName} bouncing you from {enemy.X},{enemy.Y}!", ConsoleColor.Red, 30);
+        else
+            DisplayTypingMessage($"[ALERT] ENEMY CONTACT! {enemy.AircraftName} detected at {enemy.X},{enemy.Y}!", ConsoleColor.Red);
+
         double distance = Math.Sqrt(Math.Pow(enemy.X - playerX, 2) + Math.Pow(enemy.Y - playerY, 2));
+        int chebDistance = ChebyshevDistance(playerX, playerY, enemy.X, enemy.Y);
         string distanceDesc = distance switch
         {
             <= 1 => "POINT BLANK RANGE",
@@ -1194,86 +1248,257 @@ class JetFighterGame
             <= 5 => "Medium range",
             _ => "Long range"
         };
-        
+
+        EngagementAspect aspect = ComputeAspect(enemy);
+        int altDelta = enemy.Altitude - playerAltitude;
+        bool enemyHasInitiative = ComputeEnemyInitiative(enemy, enemyInitiated, aspect, altDelta);
+
+        // SITREP
         DisplayTypingMessage($"Distance: {distance:F1} units ({distanceDesc})", ConsoleColor.Yellow);
+        DisplayTypingMessage($"Aspect: {AspectLabel(aspect)} | Altitude delta: {altDelta:+#;-#;0}", ConsoleColor.Cyan);
         DisplayTypingMessage($"Enemy Status: {enemy.Health}/{enemy.MaxHealth} HP | State: {enemy.CurrentState}", ConsoleColor.Cyan);
-        
+        if (enemyHasInitiative)
+            DisplayTypingMessage("[INITIATIVE] Enemy has the bounce — they will fire first!", ConsoleColor.Red);
+        else
+            DisplayTypingMessage("[INITIATIVE] You hold the advantage — fire first!", ConsoleColor.Green);
+
         if (enemy.CurrentState == EnemyState.Chasing)
             DisplayTypingMessage("WARNING: Enemy is actively pursuing!", ConsoleColor.Red);
         else if (enemy.CurrentState == EnemyState.Flanking)
             DisplayTypingMessage("CAUTION: Enemy attempting flanking maneuver!", ConsoleColor.Yellow);
-        
+
         DisplayCombatOptions(enemy);
-        
+
         string? action = Console.ReadLine();
         bool evaded = false;
+        bool deployedCm = false;
+        bool playerCommittedAttack = false;
+        bool fireMissile = false;
+        bool fireGun = false;
+
         switch (action?.ToLower())
         {
             case "1": // Fire missile
-                if (TryFireWeapon("Missile", enemy, 7))
-                {
-                    DisplayTypingMessage("[MISSILE] MISSILE AWAY! Tracking target...", ConsoleColor.Yellow, 50);
-                    System.Threading.Thread.Sleep(1000);
-                }
+                fireMissile = true;
+                playerCommittedAttack = true;
                 break;
             case "2": // Gun attack
-                if (TryFireWeapon("Gun", enemy, 3))
-                {
-                    DisplayTypingMessage("[GUNS] GUNS GUNS GUNS! Engaging with cannon!", ConsoleColor.Red, 40);
-                    System.Threading.Thread.Sleep(800);
-                }
+                fireGun = true;
+                playerCommittedAttack = true;
                 break;
             case "3": // Evasive maneuver
                 DisplayTypingMessage("[EVADE] Executing evasive maneuvers!", ConsoleColor.Green, 40);
                 evaded = PerformEvasiveManeuver();
                 break;
+            case "4": // Countermeasures (chaff/flares)
+                deployedCm = DeployCountermeasures();
+                break;
             default:
                 DisplayTypingMessage("[MISS] Combat opportunity missed! No action taken.", ConsoleColor.DarkRed);
                 break;
         }
-        
-        // Enemy counterattack with realistic factors
-        if (enemy.Health > 0)
+
+        // ----- PHASE 1: ENEMY FIRES FIRST IF THEY HAVE INITIATIVE -----
+        if (enemyHasInitiative && enemy.Health > 0)
+        {
+            double accMod = 1.0;
+            double dmgMod = 1.0;
+            if (evaded) { accMod *= 0.45; dmgMod *= 0.6; }
+            if (deployedCm) { accMod *= 0.35; }
+            // Aspect: head-on snap shots are harder for the enemy than rear-aspect shots.
+            if (aspect == EngagementAspect.HeadOn) accMod *= 0.85;
+            else if (aspect == EngagementAspect.Rear) accMod *= 1.15;
+
+            System.Threading.Thread.Sleep(400);
+            DisplayTypingMessage("[INCOMING] Enemy fox-2/guns -- defensive!", ConsoleColor.Red);
+            EnemyAttack(enemy, accMod, dmgMod);
+            enemyCombatResolvedThisTurn = true;
+
+            if (currentState != GameState.Playing) return;
+        }
+
+        // ----- PHASE 2: PLAYER ATTACK RESOLVES -----
+        if (fireMissile && enemy.Health > 0)
+        {
+            if (TryFireWeapon("Missile", enemy, 7, aspect))
+            {
+                DisplayTypingMessage("[MISSILE] MISSILE AWAY! Tracking target...", ConsoleColor.Yellow, 50);
+                System.Threading.Thread.Sleep(800);
+            }
+        }
+        else if (fireGun && enemy.Health > 0)
+        {
+            if (TryFireWeapon("Gun", enemy, 3, aspect))
+            {
+                DisplayTypingMessage("[GUNS] GUNS GUNS GUNS! Engaging with cannon!", ConsoleColor.Red, 40);
+                System.Threading.Thread.Sleep(600);
+            }
+        }
+
+        // ----- PHASE 3: ENEMY RETURN FIRE (only if they haven't already shot) -----
+        if (enemy.Health > 0 && !enemyCombatResolvedThisTurn)
         {
             if (evaded)
             {
-                DisplayTypingMessage("[EVADE] Enemy attack avoided! Your maneuver paid off.", ConsoleColor.Green);
+                DisplayTypingMessage("[EVADE] Enemy can't get a firing solution -- maneuver paid off.", ConsoleColor.Green);
+            }
+            else if (deployedCm)
+            {
+                DisplayTypingMessage("[DEFEND] Countermeasures spoiled the lock -- enemy holds fire.", ConsoleColor.Green);
             }
             else
             {
                 System.Threading.Thread.Sleep(500);
-                DisplayTypingMessage("[WARNING] Enemy counterattack incoming!", ConsoleColor.Red);
-                EnemyAttack(enemy);
+                DisplayTypingMessage("[WARNING] Enemy returning fire!", ConsoleColor.Red);
+                // Return fire is slightly less accurate -- the enemy is reactive, not proactive.
+                double accMod = playerCommittedAttack ? 0.85 : 1.0;
+                if (aspect == EngagementAspect.Rear) accMod *= 1.15;
+                EnemyAttack(enemy, accMod, 1.0);
+                enemyCombatResolvedThisTurn = true;
             }
         }
-        else
+
+        // ----- PHASE 4: RESOLUTION -----
+        if (enemy.Health <= 0)
         {
             DisplayTypingMessage($"[KILL] {enemy.AircraftName} DESTROYED! Excellent shooting, pilot!", ConsoleColor.Green, 40);
             DisplayTypingMessage($"[SCORE] +{enemy.ScoreValue} points earned", ConsoleColor.Yellow);
-            
+
             // Clear enemy from grid before removing from list
             grid[enemy.X, enemy.Y] = '.';
             enemyJets.Remove(enemy);
             score += enemy.ScoreValue;
-            
+
+            // Update kill counters BEFORE the victory check so that any final-kill
+            // missions ("Defeat a stealth aircraft", "High altitude combat", etc.) can be
+            // properly recognized.
+            totalEnemyKills++;
+            if (enemy is F22Raptor) stealthKills++;
+            if (playerAltitude == 3) alt3Kills++;
+
             // Random chance for power-up when defeating enemy
             if (random.NextDouble() < 0.25) // 25% chance
             {
                 System.Threading.Thread.Sleep(500);
                 PowerUp();
             }
-            
+
             if (enemyJets.Count == 0)
             {
                 currentState = GameState.Victory;
                 DisplayTypingMessage("[VICTORY] ALL ENEMIES NEUTRALIZED! MISSION ACCOMPLISHED!", ConsoleColor.Green, 50);
-                System.Threading.Thread.Sleep(1500); // Give time to read the victory message
+                System.Threading.Thread.Sleep(1500);
                 HandleGameOver();
                 return;
             }
         }
-        
+
         WaitForInput();
+    }
+
+    // ---------- Combat helpers (geometry, aspect, initiative) ----------
+
+    private static int ChebyshevDistance(int ax, int ay, int bx, int by)
+    {
+        return Math.Max(Math.Abs(ax - bx), Math.Abs(ay - by));
+    }
+
+    /// <summary>
+    /// Determine engagement aspect from the player's last heading toward the enemy:
+    ///   HeadOn: enemy is roughly in front of the player (player's facing dotted with
+    ///           the bearing-to-enemy is positive)
+    ///   Rear:   enemy is behind the player (negative dot product)
+    ///   Beam:   roughly perpendicular
+    /// </summary>
+    private EngagementAspect ComputeAspect(EnemyJet enemy)
+    {
+        int relX = enemy.X - playerX;
+        int relY = enemy.Y - playerY;
+        if (relX == 0 && relY == 0) return EngagementAspect.HeadOn;
+        // Normalize -- only directional sign matters here.
+        double mag = Math.Sqrt(relX * relX + relY * relY);
+        double rx = relX / mag;
+        double ry = relY / mag;
+        double fmag = Math.Sqrt(playerDx * playerDx + playerDy * playerDy);
+        if (fmag == 0) return EngagementAspect.Beam;
+        double fx = playerDx / fmag;
+        double fy = playerDy / fmag;
+        double dot = fx * rx + fy * ry;
+        if (dot > 0.5) return EngagementAspect.HeadOn;
+        if (dot < -0.5) return EngagementAspect.Rear;
+        return EngagementAspect.Beam;
+    }
+
+    private static string AspectLabel(EngagementAspect a) => a switch
+    {
+        EngagementAspect.HeadOn => "Head-on",
+        EngagementAspect.Beam => "Beam",
+        EngagementAspect.Rear => "Rear (six o'clock)",
+        _ => "Unknown"
+    };
+
+    /// <summary>
+    /// Determine which side has firing initiative this turn. Considers who
+    /// initiated, stealth status, aspect, altitude advantage, experience, and
+    /// a small random factor.
+    /// </summary>
+    private bool ComputeEnemyInitiative(EnemyJet enemy, bool enemyInitiated, EngagementAspect aspect, int altDelta)
+    {
+        double enemyScore = 0.0;
+        double playerScore = 0.0;
+
+        // Who started this engagement gets a strong initiative bias.
+        if (enemyInitiated) enemyScore += 0.45; else playerScore += 0.40;
+
+        // Aspect: rear-aspect attacker has the advantage; head-on neutralizes.
+        switch (aspect)
+        {
+            case EngagementAspect.Rear: playerScore += 0.20; break;       // enemy is in front -- player rear-aspect
+            case EngagementAspect.HeadOn: /* neutral */ break;
+            case EngagementAspect.Beam: enemyScore += 0.05; break;
+        }
+
+        // Stealth fighters get an initiative bonus when undetected/diving.
+        if (enemy is F22Raptor raptor && raptor.IsInStealthMode()) enemyScore += 0.25;
+        if (!enemy.IsDetected) enemyScore += 0.20;
+
+        // Altitude advantage (higher = energy advantage).
+        if (altDelta > 0) enemyScore += 0.08 * altDelta;
+        else if (altDelta < 0) playerScore += 0.08 * -altDelta;
+
+        // Combat experience.
+        enemyScore += 0.04 * enemy.CombatExperience;
+
+        // Aggressive states imply commitment to attack.
+        if (enemy.CurrentState == EnemyState.Diving) enemyScore += 0.15;
+        else if (enemy.CurrentState == EnemyState.Chasing) enemyScore += 0.05;
+        else if (enemy.CurrentState == EnemyState.Retreating) playerScore += 0.20;
+
+        // Weather slightly randomizes who reacts first.
+        if (currentWeather == Weather.Storm) { enemyScore += random.NextDouble() * 0.1; playerScore += random.NextDouble() * 0.1; }
+
+        // Carry-over evasion from a successful previous evasive maneuver.
+        if (playerEvadingNextTurn) playerScore += 0.15;
+
+        return enemyScore > playerScore;
+    }
+
+    private bool DeployCountermeasures()
+    {
+        if (countermeasures <= 0)
+        {
+            DisplayTypingMessage("[NO CM] Countermeasures depleted!", ConsoleColor.Red);
+            return false;
+        }
+        countermeasures--;
+        DisplayTypingMessage("[CHAFF/FLARE] Dispensing chaff and flares!", ConsoleColor.Yellow, 30);
+        // Countermeasures are mostly effective vs. radar/IR locks.
+        bool worked = random.NextDouble() < 0.85;
+        if (worked)
+            DisplayTypingMessage("[DEFEND] Decoys defeating enemy lock!", ConsoleColor.Green);
+        else
+            DisplayTypingMessage("[DEFEND] Decoys deployed but lock retained!", ConsoleColor.DarkYellow);
+        return worked;
     }
 
     private void CheckForCombatEncounters()
@@ -1312,7 +1537,8 @@ class JetFighterGame
             
             if (shouldEngage)
             {
-                ProcessCombat(enemy);
+                // Player initiated this engagement (entered the enemy's range during own move).
+                ProcessCombat(enemy, enemyInitiated: false);
                 if (currentState != GameState.Playing)
                     return;
                 break; // Only one combat encounter per turn
@@ -1323,6 +1549,10 @@ class JetFighterGame
     public void MovePlayer(string direction)
     {
         if (currentState != GameState.Playing) return;
+
+        // Reset per-turn combat flag at the start of the player's turn so a single
+        // turn cannot resolve enemy fire twice (player-initiated + enemy-initiated).
+        enemyCombatResolvedThisTurn = false;
 
         grid[playerX, playerY] = '.';
 
@@ -1348,6 +1578,10 @@ class JetFighterGame
                 grid[originalX, originalY] = playerJet;
                 return; // Don't consume fuel for invalid moves
         }
+
+        // Track player's facing for aspect calculations (head-on / beam / rear).
+        playerDx = dx;
+        playerDy = dy;
 
         bool moved = false;
         for (int step = 0; step < moveCount; step++)
@@ -1376,6 +1610,17 @@ class JetFighterGame
             return;
         }
 
+        // Mark the "Visit any base" objective the moment the player MOVES onto a base
+        // tile (so missions assigned while standing on a base aren't auto-completed).
+        if (basePositions.Contains((playerX, playerY)))
+        {
+            foreach (var m in activeMissions)
+            {
+                if (!m.IsComplete && m.Objective.Contains("Visit any base"))
+                    m.BaseVisitedSinceAssignment = true;
+            }
+        }
+
         // Check for enemy encounters at various combat ranges
         CheckForCombatEncounters();
 
@@ -1390,8 +1635,18 @@ class JetFighterGame
         if (currentState != GameState.Playing)
             return;
 
+        // Advance the global turn counter once per turn.
+        turnCounter++;
+
+        // Fresh enemy phase: enemies have not yet resolved their fire this turn.
+        enemyCombatResolvedThisTurn = false;
+
         UpdateWeather();
         UpdateRadar();
+
+        // Track time spent in storm conditions for the "Survive a storm" objective.
+        if (currentWeather == Weather.Storm)
+            stormTurnsLifetime++;
 
         // Clear enemy positions from grid before moving
         foreach (var jet in enemyJets)
@@ -1434,31 +1689,51 @@ class JetFighterGame
         // Check for combat encounters after all enemies have moved
         CheckForEnemyCombatInitiation();
 
-        // Check for coordinated attacks from adjacent enemies
-        var adjacentEnemies = enemyJets.FindAll(e => Math.Abs(e.X - playerX) <= 1 && Math.Abs(e.Y - playerY) <= 1);
-        
-        if (adjacentEnemies.Count >= 2)
+        // Check for coordinated attacks from adjacent enemies, but ONLY if a 1-v-1
+        // engagement has not already resolved this turn. This prevents the player
+        // from being shot at twice in the same enemy phase.
+        if (!enemyCombatResolvedThisTurn)
         {
-            int totalDamage = adjacentEnemies.Sum(e =>
+            var adjacentEnemies = enemyJets.FindAll(e => Math.Abs(e.X - playerX) <= 1 && Math.Abs(e.Y - playerY) <= 1);
+
+            if (adjacentEnemies.Count >= 2)
             {
-                int baseDamage = random.Next(1, 4); // Reduced from 1-6 to be less punishing
-                bool isCrit = random.NextDouble() < 0.15; // Reduced crit chance
-                return isCrit ? baseDamage * 2 : baseDamage;
-            });
-            
-            DisplayTypingMessage("[MULTI] MULTIPLE BOGEYS! Coordinated enemy attack detected!", ConsoleColor.Red, 50);
-            DisplayTypingMessage($"[DAMAGE] Combined assault deals {totalDamage} damage!", ConsoleColor.Red);
-            
-            playerHealth -= totalDamage;
-            if (playerHealth <= 0)
-            {
-                currentState = GameState.Defeat;
-                HandleGameOver();
-                return;
+                // Wingmen contribute reduced fire because the lead has already engaged.
+                double accMult = playerEvadingNextTurn ? 0.55 : 1.0;
+                int totalDamage = adjacentEnemies.Sum(e =>
+                {
+                    if (random.NextDouble() > 0.6 * accuracyModifier * accMult) return 0; // some shots miss
+                    int baseDamage = random.Next(1, 4);
+                    bool isCrit = random.NextDouble() < 0.10;
+                    return isCrit ? baseDamage * 2 : baseDamage;
+                });
+
+                if (totalDamage > 0)
+                {
+                    DisplayTypingMessage("[MULTI] MULTIPLE BOGEYS! Wingmen pressing the attack!", ConsoleColor.Red, 50);
+                    DisplayTypingMessage($"[DAMAGE] Combined fire deals {totalDamage} damage!", ConsoleColor.Red);
+
+                    playerHealth -= totalDamage;
+                    enemyCombatResolvedThisTurn = true;
+
+                    if (playerHealth <= 0)
+                    {
+                        currentState = GameState.Defeat;
+                        HandleGameOver();
+                        return;
+                    }
+
+                    WaitForInput("Multiple enemies engaged! Press any key to continue...");
+                }
+                else
+                {
+                    DisplayTypingMessage("[EVADE] Wingmen open fire but miss in the merge!", ConsoleColor.Green);
+                }
             }
-            
-            WaitForInput("Multiple enemies engaged! Press any key to continue...");
         }
+
+        // Evasion bonus only carries over a single turn.
+        playerEvadingNextTurn = false;
         
         // Display any queued messages
         if (messageQueue.Count > 0)
@@ -1502,7 +1777,8 @@ class JetFighterGame
             if (shouldInitiate)
             {
                 DisplayTypingMessage($"[ATTACK] {enemy.AircraftName} initiating attack run!", ConsoleColor.Red);
-                ProcessCombat(enemy);
+                // Enemy initiated -- they get initiative bias and may fire first.
+                ProcessCombat(enemy, enemyInitiated: true);
                 if (currentState != GameState.Playing)
                     return;
                 break; // Only one enemy-initiated combat per turn
@@ -1564,10 +1840,11 @@ class JetFighterGame
     private void DisplayCombatOptions(EnemyJet enemy)
     {
         Console.WriteLine("Combat Options:");
-        Console.WriteLine("1. Fire missile");
-        Console.WriteLine("2. Gun attack");
-        Console.WriteLine("3. Evasive maneuver");
-        Console.WriteLine("Choose your action (1-3):");
+        Console.WriteLine($"1. Fire missile  [Missiles: {missileAmmo}]   (effective range <=8, best head-on)");
+        Console.WriteLine($"2. Gun attack    [Rounds:   {gunAmmo}]   (effective range <=2, best rear-aspect)");
+        Console.WriteLine("3. Evasive maneuver  (reposition + reduce incoming hit)");
+        Console.WriteLine($"4. Countermeasures   [Chaff/Flare: {countermeasures}/{maxCountermeasures}] (spoil missile lock)");
+        Console.WriteLine("Choose your action (1-4):");
     }
 
     private void UpdateWeather()
@@ -1629,7 +1906,18 @@ class JetFighterGame
         {
             playerAltitude++;
             ConsumeFuel("climb");
-            
+
+            // Mark the "Reach maximum altitude" objective only when the player ACTIVELY
+            // climbs to alt 3 after the mission was assigned.
+            if (playerAltitude == 3)
+            {
+                foreach (var m in activeMissions)
+                {
+                    if (!m.IsComplete && m.Objective.Contains("Reach maximum altitude"))
+                        m.MaxAltitudeReachedSinceAssignment = true;
+                }
+            }
+
             string altitudeDesc = playerAltitude switch
             {
                 1 => "Low altitude (1000ft)",
@@ -1691,10 +1979,25 @@ class JetFighterGame
         int rewardPoints = random.Next(100, 301); // 100-300 points
         string objective = missionTypes[random.Next(missionTypes.Length)];
         string missionName = $"Mission #{++missionCounter}: {objective}";
-        
+
         Mission newMission = new Mission(missionName, rewardPoints);
+
+        // Snapshot all relevant world state at the moment of assignment. Mission
+        // completion is then evaluated as the DELTA between the current state and the
+        // snapshot, preventing pre-existing conditions from instantly closing the mission.
+        newMission.AssignedTurn = turnCounter;
+        newMission.KillsAtAssignment = totalEnemyKills;
+        newMission.StealthKillsAtAssignment = stealthKills;
+        newMission.Alt3KillsAtAssignment = alt3Kills;
+        newMission.MidAirRefuelsAtAssignment = midAirRefuels;
+        newMission.StormTurnsAtAssignment = stormTurnsLifetime;
+        newMission.StartedAtMaxAltitude = (playerAltitude == 3);
+        newMission.StartedAtBase = basePositions.Contains((playerX, playerY));
+        newMission.BaseVisitedSinceAssignment = false;
+        newMission.MaxAltitudeReachedSinceAssignment = false;
+
         activeMissions.Add(newMission);
-        
+
         DisplayTypingMessage($"[RADIO] NEW MISSION BRIEFING RECEIVED!", ConsoleColor.Cyan, 40);
         DisplayTypingMessage($"[TARGET] {missionName}", ConsoleColor.White);
         DisplayTypingMessage($"[REWARD] Mission reward: {rewardPoints} points", ConsoleColor.Yellow);
@@ -1751,79 +2054,71 @@ class JetFighterGame
 
     public void CheckMissionProgress()
     {
+        // Mission completion is evaluated as a DELTA against the snapshot taken when
+        // the mission was assigned. This guarantees rewards are only paid out for
+        // actions the player actually performed AFTER accepting the mission.
         foreach (var mission in activeMissions.ToList())
         {
-            // Skip if mission is already complete
             if (mission.IsComplete)
                 continue;
-                
-            // Check mission completion based on objective
+
             bool completed = false;
-            
+
             if (mission.Objective.Contains("Destroy an enemy jet"))
             {
-                // Check if any enemy has been destroyed (started with 3) - only complete if count actually decreased
-                completed = enemyJets.Count < 3 && score > 0; // Ensure we actually scored points from destroying enemies
+                // Need at least one new kill since the mission was assigned.
+                completed = (totalEnemyKills - mission.KillsAtAssignment) >= 1;
             }
             else if (mission.Objective.Contains("Visit any base"))
             {
-                // Check if player is currently at any base
-                bool visitedBase = basePositions.Any(basePos => playerX == basePos.Item1 && playerY == basePos.Item2);
-                completed = visitedBase;
+                // The player must MOVE onto a base after the mission was assigned. We do
+                // not credit the player for already being on a base at assignment time.
+                completed = mission.BaseVisitedSinceAssignment;
             }
             else if (mission.Objective.Contains("Reach maximum altitude"))
             {
-                completed = playerAltitude == 3;
+                // If the player was already at altitude 3 when assigned, they must
+                // descend and climb again -- the flag is only set on a fresh climb.
+                completed = mission.MaxAltitudeReachedSinceAssignment;
             }
             else if (mission.Objective.Contains("Perform mid-air refueling"))
             {
-                // Check if adjacent to a tanker (T) AND actually refueled
-                bool nearTanker = false;
-                for (int dx = -1; dx <= 1 && !nearTanker; dx++)
-                {
-                    for (int dy = -1; dy <= 1 && !nearTanker; dy++)
-                    {
-                        int nx = playerX + dx;
-                        int ny = playerY + dy;
-                        
-                        if (nx >= 0 && nx < gridSize && 
-                            ny >= 0 && ny < gridSize && 
-                            grid[nx, ny] == 'T')
-                        {
-                            nearTanker = true;
-                        }
-                    }
-                }
-                // Only complete if near tanker AND fuel is above 75% (indicating recent refuel)
-                completed = nearTanker && Fuel > MaxFuel * 0.75;
+                // Counter increments only inside the tanker branch of TryRefuel().
+                completed = (midAirRefuels - mission.MidAirRefuelsAtAssignment) >= 1;
             }
             else if (mission.Objective.Contains("Survive a storm"))
             {
-                // Must survive for multiple turns in a storm
-                completed = currentWeather == Weather.Storm && weatherTurns >= 5;
+                // Must spend at least 5 turns in a storm AFTER the mission was assigned.
+                completed = currentWeather == Weather.Storm
+                            && (stormTurnsLifetime - mission.StormTurnsAtAssignment) >= 5;
             }
             else if (mission.Objective.Contains("Defeat a stealth aircraft"))
             {
-                // Check if F-22 Raptor has been destroyed - only if we actually had one and now don't
-                completed = !enemyJets.Any(e => e is F22Raptor) && score > 0;
+                // Need a fresh stealth (F-22) kill since the mission was assigned.
+                completed = (stealthKills - mission.StealthKillsAtAssignment) >= 1;
             }
             else if (mission.Objective.Contains("High altitude combat"))
             {
-                // Complete combat at altitude 3 - need to have engaged in actual combat
-                bool enemyNearby = enemyJets.Any(e => Math.Abs(e.X - playerX) <= 3 && Math.Abs(e.Y - playerY) <= 3);
-                completed = playerAltitude == 3 && enemyNearby && score > 0;
+                // Need a kill scored while at altitude 3 since the mission was assigned.
+                completed = (alt3Kills - mission.Alt3KillsAtAssignment) >= 1;
             }
             else if (mission.Objective.Contains("Maintain air superiority"))
             {
-                // Complete if all enemies are at low health or destroyed
-                completed = !enemyJets.Any() || enemyJets.All(e => e.Health <= e.MaxHealth * 0.3);
+                // Requires actively engaging the enemy: complete only when at least one
+                // kill has happened since assignment AND every remaining enemy is at low
+                // health (or none remain). The empty-list case still requires a kill,
+                // which removes the freebie when the final enemy dies via combat.
+                bool killSinceAssign = (totalEnemyKills - mission.KillsAtAssignment) >= 1;
+                bool allLow = !enemyJets.Any() || enemyJets.All(e => e.Health <= e.MaxHealth * 0.3);
+                completed = killSinceAssign && allLow;
             }
             else if (mission.Objective.Contains("Reconnaissance mission"))
             {
-                // Complete if player has detected all enemies
-                completed = enemyJets.All(e => e.IsDetected);
+                // Requires at least one enemy to actually exist and all of them to be
+                // detected. Empty enemy list does NOT auto-complete (was a major bug).
+                completed = enemyJets.Any() && enemyJets.All(e => e.IsDetected);
             }
-            
+
             if (completed)
             {
                 CompleteActiveMission(mission);
@@ -1856,7 +2151,7 @@ class JetFighterGame
         WaitForInput();
     }
 
-    private bool TryFireWeapon(string weaponType, EnemyJet enemy, int baseDamage)
+    private bool TryFireWeapon(string weaponType, EnemyJet enemy, int baseDamage, EngagementAspect aspect = EngagementAspect.Beam)
     {
         int ammo = weaponType == "Missile" ? missileAmmo : gunAmmo;
         if (ammo <= 0)
@@ -1864,70 +2159,121 @@ class JetFighterGame
             DisplayTypingMessage($"[NO AMMO] OUT OF {weaponType.ToUpper()} AMMO! Weapon dry!", ConsoleColor.Red);
             return false;
         }
-        
-        // Calculate hit chance based on weather, altitude and distance
-        double hitChance = 0.65 * accuracyModifier;
+
         double distance = Math.Sqrt(Math.Pow(enemy.X - playerX, 2) + Math.Pow(enemy.Y - playerY, 2));
-        
-        // Adjust hit chance based on distance
-        if (distance > 5) hitChance -= 0.15;
-        if (distance > 8) hitChance -= 0.15;
-        
-        // Stealth/advanced enemies are harder to hit
-        if (enemy is F22Raptor) hitChance -= 0.25;
-        else if (enemy.CombatExperience > 3) hitChance -= 0.1;
-        
-        // Display targeting information
-        DisplayTypingMessage($"[TARGET] Targeting {enemy.AircraftName}...", ConsoleColor.Cyan, 20);
+
+        // Weapon-specific effective ranges and base accuracy.
+        double maxRange = weaponType == "Missile" ? 8.0 : 2.0;
+        double minRange = weaponType == "Missile" ? 1.0 : 0.0;
+        double hitChance = weaponType == "Missile" ? 0.70 : 0.55;
+        hitChance *= accuracyModifier;
+
+        // Out of effective envelope -- the player can take the shot but it is poor.
+        if (distance > maxRange)
+        {
+            double over = distance - maxRange;
+            hitChance -= 0.15 * over;
+            DisplayTypingMessage($"[ENVELOPE] Target outside effective {weaponType.ToLower()} range!", ConsoleColor.DarkYellow);
+        }
+        else if (distance < minRange)
+        {
+            // Missile minimum-range -- needs time to arm.
+            hitChance -= 0.25;
+            DisplayTypingMessage("[ENVELOPE] Inside missile minimum range -- weapon may not arm!", ConsoleColor.DarkYellow);
+        }
+
+        // Aspect modifiers: missiles prefer head-on (BVR), guns prefer rear-aspect (tracking).
+        if (weaponType == "Missile")
+        {
+            if (aspect == EngagementAspect.HeadOn) hitChance += 0.10;
+            else if (aspect == EngagementAspect.Rear) hitChance += 0.05;
+            else hitChance -= 0.05; // beam is tough for missiles (look-down, doppler notch)
+        }
+        else // Gun
+        {
+            if (aspect == EngagementAspect.Rear) hitChance += 0.15;
+            else if (aspect == EngagementAspect.HeadOn) hitChance -= 0.10; // closure too high
+        }
+
+        // Altitude differential -- shooting up is harder.
+        int altDelta = enemy.Altitude - playerAltitude;
+        if (altDelta > 0) hitChance -= 0.05 * altDelta;
+
+        // Lock-on phase for missiles vs. stealth/experienced targets.
+        if (weaponType == "Missile")
+        {
+            double lockChance = 0.85;
+            if (enemy is F22Raptor raptor && raptor.IsInStealthMode()) lockChance -= 0.45;
+            else if (enemy is F22Raptor) lockChance -= 0.20;
+            if (!enemy.IsDetected) lockChance -= 0.30;
+            if (currentWeather == Weather.Storm) lockChance -= 0.15;
+            else if (currentWeather == Weather.Cloudy) lockChance -= 0.05;
+            lockChance = Math.Max(0.10, Math.Min(0.98, lockChance));
+
+            DisplayTypingMessage($"[RADAR] Acquiring lock on {enemy.AircraftName}... ({lockChance * 100:F0}%)", ConsoleColor.Cyan, 20);
+            if (random.NextDouble() > lockChance)
+            {
+                DisplayTypingMessage("[NO LOCK] Failed to acquire missile lock! Weapon not released.", ConsoleColor.Red);
+                // Don't burn a missile on a no-lock shot.
+                return false;
+            }
+        }
+        else
+        {
+            // Stealth/experienced enemies are harder to track with guns too.
+            if (enemy is F22Raptor) hitChance -= 0.20;
+            else if (enemy.CombatExperience > 3) hitChance -= 0.08;
+        }
+
+        // Clamp.
+        hitChance = Math.Max(0.05, Math.Min(0.95, hitChance));
+
+        DisplayTypingMessage($"[TARGET] Targeting {enemy.AircraftName} ({AspectLabel(aspect)})...", ConsoleColor.Cyan, 20);
         DisplayTypingMessage($"Hit probability: {hitChance * 100:F0}%", ConsoleColor.Yellow);
-        
-        // Roll for hit
+
         if (random.NextDouble() <= hitChance)
         {
-            // Use playerDamage as a multiplier for weapon damage
             int baseDmg = weaponType == "Missile" ? random.Next(4, 7) : random.Next(1, 3);
+            // Rear-aspect gun hits get a damage bump (tracking shot vs. fleeting).
+            if (weaponType == "Gun" && aspect == EngagementAspect.Rear) baseDmg += 1;
             int damage = baseDmg * PlayerDamage;
             enemy.Health -= damage;
-            
+
             string hitMessage = weaponType == "Missile" ?
                 $"[IMPACT] DIRECT HIT! Missile impact confirmed! {damage} damage dealt!" :
-                $"[HIT] TARGET HIT! Cannon rounds on target! {damage} damage dealt!";            DisplayTypingMessage(hitMessage, ConsoleColor.Green, 30);
-            
-            if (damage > baseDmg * 1.5) // High damage
+                $"[HIT] TARGET HIT! Cannon rounds on target! {damage} damage dealt!";
+            DisplayTypingMessage(hitMessage, ConsoleColor.Green, 30);
+
+            if (damage > baseDmg * 1.5)
                 DisplayTypingMessage("[CRITICAL] CRITICAL DAMAGE! Excellent marksmanship!", ConsoleColor.Yellow);
 
-            // Reduce ammo
-            if (weaponType == "Missile")
-                missileAmmo--;
-            else
-                gunAmmo -= 10;
-            
+            if (weaponType == "Missile") missileAmmo--;
+            else gunAmmo -= 10;
+
             return true;
         }
         else
         {
             string missMessage = weaponType == "Missile" ?
-                "[MISS] MISSILE MISS! Target evaded - negative impact!" :
-                "[MISS] SHOTS WIDE! Cannon fire ineffective!";            DisplayTypingMessage(missMessage, ConsoleColor.Red);
-            
-            // Weather/conditions affecting accuracy
+                "[MISS] MISSILE MISS! Target evaded -- no impact!" :
+                "[MISS] SHOTS WIDE! Cannon fire ineffective!";
+            DisplayTypingMessage(missMessage, ConsoleColor.Red);
+
             if (currentWeather == Weather.Storm)
                 DisplayTypingMessage("[STORM] Storm conditions affecting targeting accuracy!", ConsoleColor.DarkYellow);
-            
-            if (weaponType == "Missile")
-                missileAmmo--;
-            else
-                gunAmmo -= 5;
-                
+
+            if (weaponType == "Missile") missileAmmo--;
+            else gunAmmo -= 5;
+
             return false;
         }
     }
 
-    private void EnemyAttack(EnemyJet enemy)
+    private void EnemyAttack(EnemyJet enemy, double accMod = 1.0, double dmgMod = 1.0)
     {
         // Base attack chance varies by aircraft type and experience
         double attackChance = 0.7 + (enemy.CombatExperience * 0.05);
-        
+
         // F-22 Raptor has higher accuracy
         if (enemy is F22Raptor)
         {
@@ -1946,12 +2292,13 @@ class JetFighterGame
             attackChance = 0.78;
             DisplayTypingMessage("[WARNING] F-16 Fighting Falcon opening fire!", ConsoleColor.Red);
         }
-        
-        // Apply weather effects to attack chance
-        attackChance *= accuracyModifier;
-        
+
+        // Apply weather and per-engagement modifiers (defensive maneuvers, countermeasures, aspect, etc.)
+        attackChance *= accuracyModifier * accMod;
+        attackChance = Math.Max(0.05, Math.Min(0.95, attackChance));
+
         System.Threading.Thread.Sleep(800); // Build tension
-        
+
         if (random.NextDouble() <= attackChance)
         {
             // Damage varies by aircraft type and experience
@@ -1962,10 +2309,11 @@ class JetFighterGame
                 F22Raptor => random.Next(3, 7),
                 _ => random.Next(1, 4)
             };
-            
+
             // Critical hit chance based on experience
             bool isCrit = random.NextDouble() < (0.15 + enemy.CombatExperience * 0.02);
             int damage = isCrit ? baseDamage * 2 : baseDamage;
+            damage = Math.Max(1, (int)Math.Round(damage * dmgMod));
             
             if (isCrit)
             {
@@ -2037,6 +2385,8 @@ class JetFighterGame
             playerX = move.Item1;
             playerY = move.Item2;
             DisplayTypingMessage("[SUCCESS] Evasive maneuver successful! New position acquired.", ConsoleColor.Green);
+            // Carry the evasion benefit into next turn (helps vs. coordinated attacks).
+            playerEvadingNextTurn = true;
             return true;
         }
         
@@ -2197,6 +2547,8 @@ class JetFighterGame
                     DisplayTypingMessage("[REFUEL] Mid-air refueling in progress...", ConsoleColor.Yellow);
                     Refuel(MaxFuel / 2); // Half tank from mid-air refueling
                     DisplayTypingMessage("[REFUEL] Mid-air refueling complete! Disconnecting fuel line.", ConsoleColor.Green);
+                    // Credit the player with a successful mid-air refuel for mission tracking.
+                    midAirRefuels++;
                     return;
                 }
             }
