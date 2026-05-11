@@ -2467,16 +2467,12 @@ class JetFighterGame
             }
             else
             {
-                // Crashed
-                playerHealth -= 2;
-                DisplayTypingMessage("[CRASH] CRASH! Emergency landing on hostile terrain!", ConsoleColor.Red);
-                
-                if (playerHealth <= 0)
-                {
-                    currentState = GameState.Defeat;
-                    HandleGameOver();
-                    return;
-                }
+                // Crashed - jet is destroyed
+                DisplayTypingMessage("[CRASH] CRASH! Emergency landing on hostile terrain! Jet destroyed!", ConsoleColor.Red);
+                playerHealth = 0;
+                currentState = GameState.Defeat;
+                HandleGameOver();
+                return;
             }
         }
         
